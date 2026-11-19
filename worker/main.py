@@ -2,6 +2,7 @@
 - vigila los canales 'En vivo' del panel y corta los picos en tiempo real
 - atiende los pedidos sueltos del panel
 - edita (un clip a la vez, los directos primero) y publica lo aprobado"""
+import os
 import queue
 import threading
 import time
@@ -15,6 +16,23 @@ from clipper.en_vivo import Monitor
 from clipper.trabajos import Pedido
 
 cola = queue.PriorityQueue()
+# el servidor (prioridad 1) se encarga de todo cuando esta encendido; los PCs (0) solo si no hay servidor
+PRIORIDAD = int(os.environ.get("CLIPPER_PRIORIDAD", "0"))
+_prio = {"t": 0, "v": False}
+
+
+def hay_prioritario():
+    """True si hay otro motor encendido con mas prioridad (ej. el servidor 24/7)."""
+    if time.time() - _prio["t"] < 30:
+        return _prio["v"]
+    _prio["t"] = time.time()
+    try:
+        limite = datetime.fromtimestamp(time.time() - 60, timezone.utc).isoformat()
+        ws = sb().table("workers").select("nombre,estado").gt("visto", limite).execute().data or []
+        _prio["v"] = any(w["nombre"] != WORKER and int((w.get("estado") or {}).get("prioridad", 0)) > PRIORIDAD for w in ws)
+    except Exception:
+        pass
+    return _prio["v"]
 monitores = {}
 estado = {"editando": None}
 
@@ -65,6 +83,9 @@ def _cerrar_trabajo_si_toca(tid):
 def pedidos():
     while True:
         try:
+            if hay_prioritario():
+                time.sleep(15)
+                continue
             r = sb().rpc("tomar_trabajo", {"p_worker": WORKER}).execute()
             if not r.data:
                 time.sleep(4)
@@ -110,6 +131,8 @@ def vigilar_directos():
                         monitores[f["id"]].f = f            # toma cambios de sensibilidad/modo al vuelo
                         sb().rpc("reclamar_fuente", {"p_id": f["id"], "p_worker": WORKER}).execute()
                         continue
+                    if hay_prioritario():
+                        continue                              # el servidor lo toma
                     # otra PC ya lo esta vigilando
                     if f.get("vigilado_por") and f["vigilado_por"] != WORKER and f.get("vigilado_hasta") \
                             and f["vigilado_hasta"] > ahora:
@@ -164,7 +187,8 @@ def latido():
             sb().table("workers").upsert({"nombre": WORKER, "visto": datetime.now(timezone.utc).isoformat(),
                                           "version": VERSION, "estado": {
                                               "en_vivo": [m.canal for m in monitores.values()],
-                                              "cola": cola.qsize(), "editando": estado["editando"]}}).execute()
+                                              "cola": cola.qsize(), "editando": estado["editando"],
+                                              "prioridad": PRIORIDAD}}).execute()
         except Exception:
             pass
         time.sleep(15)
