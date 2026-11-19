@@ -14,7 +14,7 @@ const CAMPOS = [
   ["whisper_modelo", "Precisión de subtítulos", ["base", "small", "medium"], "small = buen balance. medium = más exacto pero más lento sin tarjeta de video."],
   ["auto_puntaje_minimo", "Puntaje mínimo para publicar solo", "numero", "Solo para canales en modo automático (0-100)."],
   ["hashtags_base", "Hashtags fijos", "lista", "Se suman a los que escribe la IA. Separados por espacio."],
-  ["tiktok_modo", "TikTok", ["borrador", "directo"], "borrador: llega a la bandeja de la app. directo: solo cuando TikTok apruebe la app."],
+  ["tiktok_modo", "TikTok", ["borrador", "directo"], "borrador: llega a la bandeja de la app de TikTok y se termina desde el celular. directo: se confirma en tanda en la pestaña TikTok y se publica solo a la hora programada."],
   ["youtube_privacidad", "Privacidad en YouTube", ["public", "unlisted", "private"]],
   ["dias_guardar_videos", "Días que se guardan los videos ya publicados", "numero"],
 ];

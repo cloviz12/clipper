@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { sb, hace } from "@/lib/supabase";
 import Clips from "./Clips";
+import TikTok from "./TikTok";
 import EnVivo from "./EnVivo";
 import Pedidos from "./Pedidos";
 import Cuentas from "./Cuentas";
@@ -13,7 +14,7 @@ import Registro from "./Registro";
 import Configuracion from "./Configuracion";
 
 const PESTANAS = [
-  ["clips", "Clips"], ["vivo", "En vivo"], ["pedidos", "Pedidos"], ["cuentas", "Cuentas"],
+  ["clips", "Clips"], ["tiktok", "TikTok"], ["vivo", "En vivo"], ["pedidos", "Pedidos"], ["cuentas", "Cuentas"],
   ["sonidos", "Sonidos"], ["ajustes", "Ajustes"], ["equipo", "Equipo"], ["registro", "Registro"], ["pc", "Esta PC"],
 ];
 
@@ -39,14 +40,19 @@ export default function Panel({ sesion }) {
   const [miembro, setMiembro] = useState(null);
   const [workers, setWorkers] = useState([]);
   const [porRevisar, setPorRevisar] = useState(0);
+  const [porTiktok, setPorTiktok] = useState(0);
   const [, tic] = useState(0);
   const avisar = useRef(false);
 
   useEffect(() => {
     sb().rpc("es_miembro").then(({ data }) => setMiembro(!!data));
     const cargarW = () => sb().from("workers").select("*").then(({ data }) => setWorkers(data || []));
-    const contar = () => sb().from("clips").select("id", { count: "exact", head: true }).eq("estado", "revisar")
-      .then(({ count }) => setPorRevisar(count || 0));
+    const contar = () => {
+      sb().from("clips").select("id", { count: "exact", head: true }).eq("estado", "revisar")
+        .then(({ count }) => setPorRevisar(count || 0));
+      sb().from("clips").select("id", { count: "exact", head: true }).eq("tiktok->>estado", "esperando").neq("estado", "descartado")
+        .then(({ count }) => setPorTiktok(count || 0));
+    };
     cargarW();
     contar();
     if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission();
@@ -91,6 +97,7 @@ export default function Panel({ sesion }) {
           {PESTANAS.map(([id, nom]) => (
             <button key={id} className={`tab ${pestana === id ? "on" : ""}`} onClick={() => setPestana(id)}>
               {nom}{id === "clips" && porRevisar > 0 && <span className="num">{porRevisar}</span>}
+              {id === "tiktok" && porTiktok > 0 && <span className="num">{porTiktok}</span>}
             </button>
           ))}
         </div>
@@ -105,6 +112,7 @@ export default function Panel({ sesion }) {
       <main>
         {aviso && <div className="aviso-top" onClick={() => setAviso("")}>{aviso}</div>}
         {pestana === "clips" && <Clips email={sesion.user.email} />}
+        {pestana === "tiktok" && <TikTok sesion={sesion} />}
         {pestana === "vivo" && <EnVivo email={sesion.user.email} />}
         {pestana === "pedidos" && <Pedidos email={sesion.user.email} />}
         {pestana === "cuentas" && <Cuentas sesion={sesion} />}

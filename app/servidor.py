@@ -70,6 +70,34 @@ class Servidor:
                              "(versión nueva) una vez y vuelve a intentar.")
         self.guardar_config({k: v for k, v in datos.items() if isinstance(v, str)})
 
+    def tiktok_creador(self):
+        """Lo que TikTok exige mostrar antes de publicar: la cuenta, las privacidades que permite,
+        si tiene apagados comentarios/duo/stitch y la duracion maxima."""
+        db = self._admin()
+        r = db.table("cuentas").select("datos").eq("plataforma", "tiktok").limit(1).execute()
+        if not r.data:
+            raise ValueError("TikTok no está conectado: conéctalo en la pestaña Cuentas")
+        d = r.data[0]["datos"]
+        if time.time() > d.get("expira", 0) - 300:
+            c = self.leer_config()
+            t = requests.post("https://open.tiktokapis.com/v2/oauth/token/", timeout=30, data={
+                "client_key": c.get("tiktok_client_key", ""), "client_secret": c.get("tiktok_client_secret", ""),
+                "grant_type": "refresh_token", "refresh_token": d["refresh_token"]}).json()
+            if "access_token" not in t:
+                raise ValueError("TikTok pidió volver a conectar la cuenta (pestaña Cuentas)")
+            d.update(access_token=t["access_token"], refresh_token=t.get("refresh_token", d["refresh_token"]),
+                     expira=time.time() + int(t.get("expires_in", 86400)))
+            db.table("cuentas").update({"datos": d}).eq("plataforma", "tiktok").execute()
+        info = requests.post("https://open.tiktokapis.com/v2/post/publish/creator_info/query/", timeout=30,
+                             headers={"Authorization": f"Bearer {d['access_token']}",
+                                      "Content-Type": "application/json; charset=UTF-8"}).json()
+        err = info.get("error") or {}
+        if err.get("code") not in (None, "ok"):
+            if err.get("code") == "spam_risk_too_many_posts":
+                raise ValueError("Esta cuenta llegó al límite de publicaciones de TikTok por hoy. Intenta mañana.")
+            raise ValueError(f"TikTok: {err.get('message') or err.get('code')}")
+        return info.get("data") or {}
+
     def guardar_cuenta(self, red, cuenta, datos):
         self._admin().table("cuentas").upsert({"plataforma": red, "cuenta": cuenta, "datos": datos,
                                                "conectado": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}).execute()
@@ -264,6 +292,10 @@ class Servidor:
                             return self._json(403, {"error": "Tu sesión no es de un miembro del equipo"})
                         srv.iniciar_oauth(ruta.split("/")[3])
                         return self._json(200, {"ok": True})
+                    if ruta == "/api/tiktok/creador":
+                        if not srv.miembro(datos.get("token")):
+                            return self._json(403, {"error": "Tu sesión no es de un miembro del equipo"})
+                        return self._json(200, srv.tiktok_creador())
                     if ruta == "/api/instagram":
                         if not srv.miembro(datos.get("token")):
                             return self._json(403, {"error": "Tu sesión no es de un miembro del equipo"})
