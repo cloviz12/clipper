@@ -14,7 +14,48 @@ const CAMPOS = [
   ["nombre_motor", "Nombre de esta PC en el panel", "Ej: pc-juan", false],
 ];
 
-export default function Configuracion({ inicial, onListo }) {
+function Actualizaciones({ sesion }) {
+  const [e, setE] = useState(null);
+  const [tok, setTok] = useState("");
+  const [msg, setMsg] = useState("");
+  const cargar = () => local("/api/actualizacion").then(setE).catch(() => {});
+  useEffect(() => { cargar(); const i = setInterval(cargar, 3000); return () => clearInterval(i); }, []);
+  async function guardarToken(ev) {
+    ev.preventDefault();
+    try {
+      await local("/api/github_token", { token: sesion.access_token, github_token: tok });
+      setTok("");
+      setMsg("Token guardado para todo el equipo. Revisando...");
+    } catch (err) { setMsg(String(err.message || err)); }
+  }
+  if (!e) return null;
+  return (
+    <div className="caja" style={{ maxWidth: 640, marginTop: 16 }}>
+      <h2>Actualizaciones</h2>
+      <p style={{ margin: "0 0 6px" }}>
+        Versión instalada <b>{e.version}</b>{e.ultima ? <> · última en GitHub <b>{e.ultima}</b></> : null}
+      </p>
+      <p className="suave" style={{ marginTop: 0 }}>{e.mensaje}</p>
+      <p className="suave" style={{ fontSize: 12 }}>
+        Cada vez que se mergea algo a main, GitHub publica una versión nueva y la app se instala sola (revisa cada 30 min,
+        y espera a que no esté editando un clip).
+      </p>
+      <button className="btn" onClick={() => local("/api/actualizacion/revisar", {}).then(cargar)}>Buscar ahora</button>
+      {sesion && (
+        <form onSubmit={guardarToken} style={{ marginTop: 14 }}>
+          <label>Token de GitHub de solo lectura (el repo es privado). Se guarda una vez para las dos PCs.</label>
+          <div className="fila">
+            <input type="password" value={tok} onChange={(x) => setTok(x.target.value)} placeholder="github_pat_..." required style={{ flex: 1 }} />
+            <button className="btn prim">Guardar</button>
+          </div>
+          {msg && <div className="suave" style={{ fontSize: 12, marginTop: 6 }}>{msg}</div>}
+        </form>
+      )}
+    </div>
+  );
+}
+
+export default function Configuracion({ inicial, onListo, sesion }) {
   const [d, setD] = useState({});
   const [msg, setMsg] = useState("");
   const [motor, setMotor] = useState(null);
@@ -33,6 +74,7 @@ export default function Configuracion({ inicial, onListo }) {
     }
   }
   return (
+    <>
     <form className={inicial ? "login caja" : "caja"} style={{ maxWidth: 640 }} onSubmit={guardar}>
       {inicial && <div className="logo" style={{ marginBottom: 6 }}>CLIP<span>PER</span></div>}
       <h2>{inicial ? "Configurar esta PC" : "Esta PC"}</h2>
@@ -58,6 +100,11 @@ export default function Configuracion({ inicial, onListo }) {
           onChange={(e) => setD({ ...d, iniciar_con_windows: e.target.checked })} />
         Abrir CLIPPER al prender el PC (en la bandeja)
       </label>
+      <label style={{ display: "flex", gap: 8, color: "var(--texto)" }}>
+        <input type="checkbox" style={{ width: "auto" }} checked={d.actualizar_solo !== false}
+          onChange={(e) => setD({ ...d, actualizar_solo: e.target.checked })} />
+        Actualizarse sola cuando haya versión nueva en GitHub
+      </label>
       <div className="fila" style={{ marginTop: 16 }}>
         <button className="btn prim" type="submit">Guardar</button>
         <span className="suave">{msg}</span>
@@ -68,5 +115,7 @@ export default function Configuracion({ inicial, onListo }) {
         </p>
       )}
     </form>
+    {!inicial && <Actualizaciones sesion={sesion} />}
+    </>
   );
 }

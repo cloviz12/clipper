@@ -30,18 +30,23 @@ del todo se usa el menú de la bandeja. En *Esta PC* se puede dejar que abra sol
 **Dos PCs a la vez:** cada canal en vivo lo vigila una sola PC. Si esa se apaga, la otra lo toma en
 menos de 2 minutos. Los pedidos y las publicaciones también se reparten sin repetirse.
 
-## Sacar una versión nueva
+## Actualizaciones automáticas
 
-Cada PR construye el instalador y lo deja como *artifact* para probarlo. Para publicarlo en Releases
-se crea un tag de versión sobre `main`:
+Cada vez que se mergea algo a `main`, GitHub construye el instalador, lo prueba y lo publica en
+**Releases** como versión `1.0.N`. Las apps instaladas revisan cada 30 minutos; si hay versión nueva la
+bajan y la instalan en silencio cuando no hay ningún clip editándose, y vuelven a abrir solas en la
+bandeja.
 
-```
-git tag v1.0.1 && git push origin v1.0.1
-```
+Como el repo es privado, la app necesita un token de GitHub de solo lectura para ver las versiones.
+Se pega una sola vez en *Esta PC → Actualizaciones* y queda guardado en Supabase para las dos PCs.
+Para crearlo: GitHub → Settings → Developer settings → **Fine-grained tokens** → *Generate new token* →
+*Only select repositories: clipper* → permiso **Contents: Read-only**.
+
+Cada PR también construye el instalador y lo deja como *artifact*, para probarlo antes de mergear.
 
 ## Preparar Supabase (una sola vez)
 
-Crear un proyecto y correr en orden las migraciones de `supabase/migrations`, ya sea con
+Crear un proyecto y correr en orden todas las migraciones de `supabase/migrations`, ya sea con
 `supabase link` + `supabase db push` o pegándolas en el SQL Editor. En *Authentication → Providers →
 Email* dejar activo el registro con correo.
 

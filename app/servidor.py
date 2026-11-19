@@ -21,11 +21,12 @@ LISTO_HTML = """<!doctype html><meta charset="utf-8"><title>CLIPPER</title>
 
 
 class Servidor:
-    def __init__(self, puerto, ui, leer_config, guardar_config, reiniciar, estado, version, carpeta, al_mostrar=None, secretos=()):
+    def __init__(self, puerto, ui, leer_config, guardar_config, reiniciar, estado, version, carpeta, al_mostrar=None, secretos=(), actualizador=None):
         self.puerto, self.ui = puerto, Path(ui)
         self.leer_config, self.guardar_config, self.reiniciar = leer_config, guardar_config, reiniciar
         self.estado, self.version, self.carpeta, self.al_mostrar = estado, version, carpeta, al_mostrar
         self.secretos = set(secretos)
+        self.act = actualizador
         self.pendientes = {}   # state -> {red, verifier, t}
 
     # -------------------------------------------------------------- utilidades
@@ -173,6 +174,8 @@ class Servidor:
                         pub = {k: v for k, v in c.items() if k not in srv.secretos}
                         pub.update({f"{k}_guardada": bool(c.get(k)) for k in srv.secretos})
                         return self._json(200, pub)
+                    if ruta == "/api/actualizacion":
+                        return self._json(200, srv.act.estado if srv.act else {"mensaje": "sin actualizador"})
                     if ruta == "/api/motor":
                         return self._json(200, {"version": srv.version, "encendido": srv.estado.get("motor"),
                                                 "error": srv.estado.get("error"), "carpeta": str(srv.carpeta)})
@@ -208,6 +211,23 @@ class Servidor:
                     if ruta == "/api/configuracion":
                         srv.guardar_config(datos)
                         threading.Timer(0.8, srv.reiniciar).start()
+                        return self._json(200, {"ok": True})
+                    if ruta == "/api/actualizacion/revisar":
+                        if srv.act:
+                            threading.Thread(target=srv.act.revisar, daemon=True).start()
+                        return self._json(200, {"ok": True})
+                    if ruta == "/api/github_token":
+                        if not srv.miembro(datos.get("token")):
+                            return self._json(403, {"error": "Tu sesión no es de un miembro del equipo"})
+                        gt = (datos.get("github_token") or "").strip()
+                        r = requests.get("https://api.github.com/repos/cloviz12/clipper", timeout=20,
+                                         headers={"Authorization": f"Bearer {gt}", "User-Agent": "CLIPPER"})
+                        if r.status_code != 200:
+                            return self._json(400, {"error": f"GitHub no aceptó el token ({r.status_code})"})
+                        srv._admin().table("secretos").upsert({"clave": "github_token", "valor": gt}).execute()
+                        if srv.act:
+                            srv.act.token_nuevo = gt
+                            threading.Thread(target=srv.act.revisar, daemon=True).start()
                         return self._json(200, {"ok": True})
                     if ruta == "/api/mostrar":
                         if srv.al_mostrar:

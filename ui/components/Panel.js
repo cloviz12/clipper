@@ -112,7 +112,7 @@ export default function Panel({ sesion }) {
         {pestana === "ajustes" && <Ajustes />}
         {pestana === "equipo" && <Equipo email={sesion.user.email} />}
         {pestana === "registro" && <Registro />}
-        {pestana === "pc" && <Configuracion />}
+        {pestana === "pc" && <Configuracion sesion={sesion} />}
       </main>
     </>
   );
