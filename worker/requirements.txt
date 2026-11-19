@@ -1,0 +1,9 @@
+supabase>=2.10
+yt-dlp[default]
+streamlink>=7
+faster-whisper
+chat-downloader
+opencv-python-headless
+numpy
+requests
+websocket-client
