@@ -22,16 +22,29 @@ TIPOS = {
     "risa": re.compile(
         r"(kekw|lul\w*|omegalul|icant|lmao+|lmfao|rofl|xd+|jsjs\w*|jaja\w*|jeje\w*|jiji\w*|ajaj\w*|haha\w*|"
         r"jajs\w*|kek\b|pffs?t|muero|me mue+ro|me ca(i|igo) de risa|ctm+|😂|🤣|💀|kappa|4head|pepelaugh|aware|"
-        r"\bwkwk\w*|\bkkk+)"),
+        r"\bwkwk\w*|\bkkk+|"
+        # Colombia / Venezuela / Caribe: risa escrita a la carrera y frases tipicas
+        r"\bjsj\w*|\bjs+\b|\bksks\w*|\bjk+jk\w*|\bajsj\w*|\basj+\w*|\bjaks\w*|\bjsdj\w*|"
+        r"me (orin|meo|cago|parto)\w*|que risa|que gracia|me muero|\bxdd+|\blpm\b|lmaoo+|risas?\b|"
+        r"jajaj|jajsj|ksjs|\bxdxd)"),
     "sorpresa": re.compile(
-        r"(wtf+|\bque{3,}|\bqu[eé] (pas[oó]|fue eso|carajo|verga)|\bqu[eé]+\?+|no+ ?ma(m|ms)es|nooo+|omg+|pog\w*|monka\w*|"
+        r"(wtf+|\bque{3,}|\bqu[eé] (pas[oó]|fue eso|carajo|verga|es eso|hubo)|\bqu[eé]+\?+|no+ ?ma(m|ms)es|nooo+|omg+|pog\w*|monka\w*|"
         r"wow+|\?{2,}|ah+ ?re+|c[oó]mo+\?+|o+ ?h+ ?no+|dios m[ií]o|asust|susto|que miedo|😱|😳|🤯|🫢|holy|"
-        r"insane|no puede ser|naaa+|bro+ ?what)"),
+        r"insane|no puede ser|naaa+|bro+ ?what|"
+        # Colombia: uy, uff, juepucha, hp, nojoda, ome, uich, mk, marica (como exclamacion)
+        r"\buy+\b|\buf+\b|\buff+|jue ?puta|jue ?pucha|ju[eé]pu\w*|hijue\w*|\bhp+\b|\bhpta\b|\bnojoda|no joda|"
+        r"\bome\b|\buich|\bmk+\b|\bmarica\b|\bmaricaa+|\bmani\b|que hijue|ay+ no+|\bay+ ?ay+|"
+        # Mexico / Argentina / Espana / Peru
+        r"\bnmms\b|\bnmm\b|\balv\b|a la verga|\bptm\b|\bptmr\b|\bctmr\b|\bjoder\b|\bostia|\bhostia|"
+        r"\bla puta\b|\bboludo+\b|\bque onda\b|\bwatafa\w*)"),
     "hype": re.compile(
         r"(go+l+|vamo+s?|lets go+|let'?s go+|ez+\b|clutch|godlike|bestia|crack|grande+|tremend|epic[oa]|"
-        r"\bw+\b|\bgg+\b|🔥|💪|🐐|goat|si+u+|aguante|toma+|po+g+|ole+|bien+ ?ah[ií])"),
-    "triste": re.compile(r"(\bf+\b|sadge|rip+\b|nooo+ ?(por|porque)|que pena|pobre+|😢|😭|💔|biblethump|\bl\b)"),
-    "clip": re.compile(r"(\bclip+\b|clipea|clipeen|clipealo|clip it|clipp?ed|alguien clip)"),
+        r"\bw+\b|\bgg+\b|🔥|💪|🐐|goat|si+u+|aguante|toma+|po+g+|ole+|bien+ ?ah[ií]|"
+        r"chimba|berrac|verrac|\bnashe|\bbrutal|\bmostro|\bmonstruo|\bmaquina|\bduro+\b|\bque nivel|"
+        r"\bcrack+|\bfiera|\bleyenda|\bdemasiado+\b|\btremenda)"),
+    "triste": re.compile(r"(\bf+\b|sadge|rip+\b|nooo+ ?(por|porque)|que pena|pobre+|😢|😭|💔|biblethump|\bl\b|"
+                         r"\bpailas|\bque mal|\bque tristeza|\bnooo+ ?parce)"),
+    "clip": re.compile(r"(\bclip+\b|clipea|clipeen|clipealo|clip it|clipp?ed|alguien clip|clipazo|clipardo|\bclipp?\b)"),
 }
 # lo que no hace a un clip aunque lo escriba todo el chat
 NO_TEMA = set("""
@@ -40,6 +53,7 @@ sub subs prime follow seguir sigueme hello hi hey bro wey we pana parce che bolu
 que con por para los las una uno del pero como mas muy ese esa eso esto este esta aqui ahi alla ya si no
 the and you that this for what with have are was just like lol
 jaja jajaja xd kekw lul pog wtf omg clip gg ez w f l mames mame verga carajo chingado
+parce parcero llave mor ome mk marica mani hp emote emoji uy uff jsjs
 """.split())
 VACIAS = set("""
 a al de el en es la le lo me mi mis se su sus te tu tus y o u un e ni yo vos que q k xq pq porq porque
@@ -49,10 +63,13 @@ mexico argentina chile peru colombia espana venezuela ecuador uruguay bolivia
 """.split())
 
 PALABRA = re.compile(r"[a-z0-9ñ]+|[\U0001F300-\U0001FAFF]")
+# Kick manda los emotes como [emote:12345:KEKW]: se deja solo el nombre (KEKW cuenta como risa)
+EMOTE_KICK = re.compile(r"\[emote:\d+:([^\]]+)\]")
 
 
 def _limpiar(texto):
-    t = unicodedata.normalize("NFKD", (texto or "").lower())
+    t = EMOTE_KICK.sub(r" \1 ", texto or "")
+    t = unicodedata.normalize("NFKD", t.lower())
     t = "".join(c for c in t if not unicodedata.combining(c) or c == "̃")
     return unicodedata.normalize("NFC", t)
 
@@ -109,21 +126,23 @@ def palabras_normales(mensajes):
 class Lectura:
     """Lo que paso en el chat en una ventana."""
 
-    def __init__(self, gente=0, tipo=None, frac_tipo=0.0, tema=None, frac_tema=0.0, por_tipo=None):
+    def __init__(self, gente=0, tipo=None, frac_tipo=0.0, tema=None, frac_tema=0.0, por_tipo=None, frac_reaccion=0.0):
         self.gente = gente                # personas distintas que escribieron
         self.tipo = tipo                  # reaccion dominante: risa / sorpresa / hype / triste / clip
         self.frac_tipo = frac_tipo        # que parte de esa gente reacciono asi
         self.tema = tema                  # palabra que todos repiten (si es un disparo real)
         self.frac_tema = frac_tema
         self.por_tipo = por_tipo or {}
+        self.frac_reaccion = frac_reaccion  # parte de la gente que reacciono de CUALQUIER forma (risa, uy, chimba...)
 
     @property
     def consenso(self):
         """0..1: que tan de acuerdo esta el chat en lo que siente o de lo que habla."""
-        if self.gente < 4:
+        if self.gente < 3:                # chats chicos: con 3 personas reaccionando a lo mismo ya dice algo
             return 0.0
         r = self.frac_tipo * (1.15 if self.tipo == "risa" else 1.0)
-        return min(1.0, max(r, self.frac_tema * 1.1))
+        # un chat que mezcla "jsjsjs", "uy hp" y "que chimba" esta reaccionando todo a lo mismo
+        return min(1.0, max(r, self.frac_tema * 1.1, 0.85 * self.frac_reaccion))
 
     def etiquetas(self):
         out = []
@@ -155,6 +174,7 @@ def leer(mensajes, normal=None):
     cuenta_tipo = Counter(t for tp, _ in pu.values() for t in tp)
     por_tipo = {k: v / gente for k, v in cuenta_tipo.items()}
     tipo, frac_tipo = max(por_tipo.items(), key=lambda kv: kv[1]) if por_tipo else (None, 0.0)
+    frac_reaccion = sum(1 for tp, _ in pu.values() if tp) / gente
 
     gente_base, cuenta_base = normal or (1, Counter())
     tema, frac_tema = None, 0.0
@@ -165,7 +185,7 @@ def leer(mensajes, normal=None):
         if f >= 0.2 and f > 3 * cuenta_base.get(w, 0) / gente_base + 0.05:   # se disparo ahora
             tema, frac_tema = w, f
             break
-    return Lectura(gente, tipo, frac_tipo, tema, frac_tema, por_tipo)
+    return Lectura(gente, tipo, frac_tipo, tema, frac_tema, por_tipo, frac_reaccion)
 
 
 def serie(mensajes, dur, ventana=8):

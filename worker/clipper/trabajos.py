@@ -3,7 +3,7 @@ Encuentra los mejores momentos SIN bajar el video completo y manda cada tramo a 
 import time
 
 from . import fuentes as F
-from . import momentos, reacciones
+from . import momentos, reacciones, viralidad
 from .base import ajustes, hms, log, parse_rango, sb, slug
 from .render_tramo import bajar
 
@@ -95,8 +95,12 @@ class Pedido:
             seg = score[int(a):int(b) + 1]
             pico = float(seg.argmax()) if len(seg) and seg.max() > 0 else None
             etiquetas, motivos, extra = list(usadas), [], {}
+            # que tan fuerte fue este momento frente al resto del video (para la barra de viralidad)
+            viral = {"momento": min(1.0, float(val) / 1.2)}
             if clips:
                 gente = {c for t, c in clips[1] if a <= t <= b + 5}
+                if gente:
+                    viral["publico"] = min(1.0, 0.3 + 0.15 * len(gente))
                 if len(gente) >= 2:
                     etiquetas.insert(0, f"{len(gente)} clips de la comunidad a la vez")
                     motivos.append(f"{len(gente)} personas sacaron clip de este momento")
@@ -106,8 +110,12 @@ class Pedido:
                                        reacciones.palabras_normales([m for m in prep if a - 300 <= m[0] < a]))
                 etiquetas += lect.etiquetas()
                 motivos.append(lect.describir())
+                if lect.gente:
+                    viral["chat"] = min(1.0, lect.consenso * viralidad.EXTRA_TIPO.get(lect.tipo, 1.0))
+                    viral["reaccion"] = lect.tipo if lect.frac_tipo >= 0.2 else None
                 extra["chat"] = [x for t, x in crudos if a <= t <= b][-40:]
             extra["reaccion_chat"] = "; ".join(m for m in motivos if m)
+            extra["viral"] = viral
             self._encolar({"archivo": arch, "canal": canal, "origen": "vod" if inf.get("was_live") else "video",
                            "url_fuente": uf, "inicio": a, "titulo_fuente": inf.get("title", ""), "pico": pico,
                            "puntaje": float(val), "senales": etiquetas, **extra})

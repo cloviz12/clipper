@@ -66,6 +66,17 @@ h3 { margin: 0 0 8px; font-size: 15px; }
 .clip .vid img, .clip .vid video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .clip .vid .play { position: absolute; inset: 0; display: grid; place-items: center; font-size: 34px; color: #fff; text-shadow: 0 2px 10px #000; }
 .clip .hook { font-weight: 800; font-size: 15px; margin: 4px 0; }
+.viral { margin: 6px 0 4px; --c: var(--rojo); }
+.viral.medio { --c: var(--ambar); }
+.viral.alto { --c: var(--acento); }
+.viral-cab { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: var(--suave); }
+.viral-cab b { color: var(--c); font-size: 15px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.viral .barra { height: 8px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--borde); overflow: hidden; margin-top: 3px; }
+.viral .barra i { display: block; height: 100%; background: var(--c); border-radius: 999px; transition: width .4s ease; }
+.viral-partes { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 5px; font-size: 11px; color: var(--suave); font-variant-numeric: tabular-nums; }
+.viral-partes > span { display: inline-flex; align-items: center; gap: 5px; }
+.viral-partes .mini { display: inline-block; width: 34px; height: 4px; border-radius: 999px; background: var(--panel2); overflow: hidden; }
+.viral-partes .mini i { display: block; height: 100%; background: var(--suave); }
 .puntaje { font-weight: 900; font-size: 13px; padding: 2px 8px; border-radius: 8px; background: var(--panel2); }
 .puntaje.alto { color: var(--acento); }
 .puntaje.medio { color: var(--ambar); }

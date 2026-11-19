@@ -24,7 +24,7 @@ Reglas:
 5. hashtags: 4 o 5, siempre el del streamer, el del juego o tema si aplica y 2 de nicho; minusculas, con #.
 6. correcciones: nombres propios o palabras que la transcripcion escribio mal (por el chat o el titulo del directo), como {"mal":"bien"}.
 7. "reaccion_del_chat" dice como reacciono la gente en vivo (si se rio, se sorprendio o de que hablaban todos). Es la mejor pista de que es lo gracioso o fuerte del clip: usala para elegir el hook y el titulo (por ejemplo, si todos hablaban de "el gato", el hook va sobre eso). Si medio chat se rio, el clip casi seguro paga.
-8. puntaje 0-100: que tan probable es que este clip funcione como Short independiente.
+8. puntaje 0-100: que tan probable es que este clip funcione como Short independiente (que se vuelva viral). "fuerza_del_publico_0a1" dice que tanto exploto el chat y la gente frente a lo normal de ese canal; un chat chico (por ejemplo colombiano: "jsjsjs", "uy hp", "qué chimba") tambien cuenta si reacciono todo a la vez. Juzga sobre todo si se entiende sin contexto y si el momento paga.
 Responde SOLO JSON con: sirve (bool), razon (corta), puntaje (int), hook, titulo_youtube, caption_tiktok, caption_instagram, hashtags (lista), correcciones (objeto)."""
 
 
@@ -54,6 +54,8 @@ def textos(ctx, aj):
         "chat_en_ese_momento": ctx.get("chat", [])[:40],
         "reaccion_del_chat": ctx.get("reaccion_chat") or "",
         "senales": ctx.get("senales"), "segundo_del_pico": ctx.get("pico"),
+        "categoria_del_directo": ctx.get("categoria"),
+        "fuerza_del_publico_0a1": {k: v for k, v in (ctx.get("viral") or {}).items() if k != "reaccion"},
     }, ensure_ascii=False)
     try:
         r = requests.post("https://api.anthropic.com/v1/messages", timeout=60, headers={

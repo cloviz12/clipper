@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from . import efectos, encuadre, ia, subtitulos
+from . import efectos, encuadre, ia, subtitulos, viralidad
+from .fuentes import es_videojuego
 from .base import FUENTES_TXT, TRABAJO, WORKER, ajustes, log, probe, run, sb, slug, tool
 
 
@@ -69,7 +70,7 @@ def renderizar(src, ctx, carpeta=None):
     palabras = ia.corregir(palabras, tx.get("correcciones"))
 
     # 4. encuadre y efectos
-    plan = encuadre.planear(src, info, aj.get("formato", "auto"))
+    plan = encuadre.planear(src, info, aj.get("formato", "auto"), es_videojuego(ctx.get("categoria")))
     rnd = random.Random(cid)
     ncam = efectos.INTENSIDAD.get(aj.get("efectos_camara", "medio"), 2)
     nsfx = efectos.INTENSIDAD.get(aj.get("efectos_sonido", "medio"), 2)
@@ -133,6 +134,9 @@ def renderizar(src, ctx, carpeta=None):
         "tiktok": {"caption": f"{tx['caption_tiktok']}\n\n{' '.join(tags[:5])}"},
         "instagram": {"caption": f"{tx['caption_instagram']}\n\n{credito}\n\n{' '.join(tags[:5])}"},
     }
+    # probabilidad de viralidad: lo que paso en el stream (chat, publico, rareza del pico) + la IA
+    senales_v = ctx.get("viral") or {"momento": ctx.get("puntaje")}
+    viral = viralidad.calcular(senales_v, tx.get("puntaje"), tx.get("sirve", True))
     fuente = ctx.get("fuente") or {}
     auto = (fuente.get("publicacion") == "auto" or ctx.get("auto")) and tx.get("sirve", True) \
         and int(tx.get("puntaje", 0)) >= int(aj.get("auto_puntaje_minimo", 70))
@@ -142,7 +146,8 @@ def renderizar(src, ctx, carpeta=None):
         "duracion": round(dur, 1), "puntaje": tx.get("puntaje"), "senales": ctx.get("senales") or [],
         "transcripcion": " ".join(f["texto"] for f in frases)[:4000], "hook": tx.get("hook"),
         "titulo": tx["titulo_youtube"][:95], "descripcion": textos["youtube"]["descripcion"], "textos": textos,
-        "hashtags": tags, "ia": {"sirve": tx.get("sirve"), "razon": tx.get("razon"), "encuadre": plan["tipo"],
+        "hashtags": tags, "ia": {"sirve": tx.get("sirve"), "razon": tx.get("razon"), "encuadre": plan["tipo"], "viralidad": viral,
+                                 "categoria": ctx.get("categoria"),
                                  "letra": estilo["fuente"], "golpes": puntos, "sonidos": len(sonidos)},
         "video_path": vpath, "miniatura_path": mpath,
         "estado": "aprobado" if auto else "revisar",
@@ -156,6 +161,7 @@ def renderizar(src, ctx, carpeta=None):
     if carpeta is None:
         salida.unlink(missing_ok=True)
     log(f"clip listo de {canal} en {time.time() - t0:.0f}s — {plan['tipo']}, {len(puntos)} golpes, "
-        f"{len(sonidos)} sonidos — {'PUBLICANDO YA' if auto else 'para revisar'}: {tx.get('hook')}",
+        f"{len(sonidos)} sonidos — {'PUBLICANDO YA' if auto else 'para revisar'}"
+        f"{f' (viralidad {viral["total"]}%)' if viral else ''}: {tx.get('hook')}",
         "clip", clip=cid)
     return cid

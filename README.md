@@ -16,6 +16,20 @@ supabase/   Base de datos compartida (migraciones)
 .github/    GitHub construye el instalador solo y lo publica en Releases
 ```
 
+## Cómo decide qué clipear
+
+- **Cada canal tiene su propio umbral.** CLIPPER aprende cómo reacciona el público de *ese* streamer
+  (cuánta gente comenta, qué tan fuerte reacciona) y corta lo que se sale de lo normal para esa audiencia.
+  Un chat chico (por ejemplo colombiano, con "jsjsjs", "uy hp", "qué chimba") ya no queda por debajo del
+  umbral de un chat de miles. Lo aprendido se guarda y el siguiente directo arranca calibrado. En *En vivo*
+  se elige cuántos momentos por hora buscar y se ve lo aprendido de cada canal.
+- **Barra de viralidad.** Cada clip trae una probabilidad de viralidad (0-100 %) que junta la reacción del
+  chat, cuánta gente apareció, qué tan raro fue el pico para ese streamer y el veredicto de la IA. En
+  *Clips* se pueden ordenar por "Más virales primero".
+- **Encuadre split en videojuegos.** Si el directo está en un juego (según la categoría de Twitch/Kick),
+  el clip siempre sale con la cámara arriba y el juego abajo. El recuadro de la facecam se busca por sus
+  bordes reales, así no entra juego en la cámara y el juego de abajo esquiva la cámara.
+
 ## Instalar
 
 1. En GitHub ve a **Releases** y descarga `CLIPPER-Setup-x.y.z.exe`. El compañero tiene que estar

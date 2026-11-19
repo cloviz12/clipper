@@ -38,6 +38,22 @@ class Chat:
             s[int(t - desde)].add(u)
         return [float(len(x)) for x in s]
 
+    def gente_entre(self, a, b):
+        return len({m[1] for m in self._entre(a, b)})
+
+    def gente_tipica(self, desde, hasta, ventana=10):
+        """Mediana de personas distintas que escriben en ventanas de 'ventana' segundos: el tamano real
+        de la audiencia que comenta (un chat colombiano chico tiene 2-4, uno grande 40+)."""
+        msgs = self._entre(desde, hasta)
+        if not msgs:
+            return 0.0
+        cajas = {}
+        for t, u, _, _ in msgs:
+            cajas.setdefault(int((t - desde) // ventana), set()).add(u)
+        n = max(1, int((hasta - desde) // ventana))
+        vals = sorted(len(cajas.get(i, ())) for i in range(n))
+        return float(vals[len(vals) // 2])
+
     def lectura(self, a, b, antes=300):
         """Que paso en el chat entre a y b, comparado con lo normal de los minutos previos."""
         return reacciones.leer(self._entre(a, b), reacciones.palabras_normales(self._entre(a - antes, a)))

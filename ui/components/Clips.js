@@ -19,10 +19,43 @@ async function firmada(path) {
   return data?.signedUrl;
 }
 
-function Puntaje({ v }) {
-  if (v == null) return null;
-  const c = v >= 70 ? "alto" : v >= 45 ? "medio" : "bajo";
-  return <span className={`puntaje ${c}`} title="Probabilidad de funcionar como Short (IA)">{Math.round(v)}</span>;
+const PARTES = [
+  ["chat", "Chat", "Qué parte del chat reaccionó a lo mismo (risa, sorpresa, hype)"],
+  ["publico", "Público", "Cuánta gente apareció frente a lo normal del canal y si sacaron clips"],
+  ["momento", "Momento", "Qué tan raro fue el pico para este streamer y si el audio explotó"],
+  ["ia", "IA", "Si se entiende solo y el momento paga, según la IA"],
+];
+const REACCION = { risa: "😂 risa", sorpresa: "😱 sorpresa", hype: "🔥 hype", triste: "😢 lamento", clip: "🎬 pidieron clip" };
+
+export function viralDe(c) {
+  return c.ia?.viralidad?.total ?? (c.puntaje != null ? Math.round(c.puntaje) : null);
+}
+
+function Viralidad({ c }) {
+  const v = c.ia?.viralidad;
+  const total = viralDe(c);
+  if (total == null) return null;
+  const nivel = total >= 70 ? "alto" : total >= 45 ? "medio" : "bajo";
+  return (
+    <div className={`viral ${nivel}`}>
+      <div className="viral-cab">
+        <span>Probabilidad de viralidad</span>
+        <b>{total}%</b>
+      </div>
+      <div className="barra" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={total}
+        aria-label="Probabilidad de viralidad"><i style={{ width: `${total}%` }} /></div>
+      {v?.partes && (
+        <div className="viral-partes">
+          {PARTES.filter(([k]) => v.partes[k] != null).map(([k, nom, ayuda]) => (
+            <span key={k} title={ayuda}>
+              {nom}<span className="mini"><i style={{ width: `${v.partes[k]}%` }} /></span>{v.partes[k]}
+            </span>
+          ))}
+          {v.reaccion && REACCION[v.reaccion] && <span>{REACCION[v.reaccion]}</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Tarjeta({ c, email }) {
@@ -50,16 +83,17 @@ function Tarjeta({ c, email }) {
       </div>
       <div style={{ minWidth: 0 }}>
         <div className="fila" style={{ gap: 6 }}>
-          <Puntaje v={c.puntaje} />
           <b>{c.canal}</b>
           <span className="chip">{c.origen?.replace("_", " ")}</span>
           <span className="suave" style={{ fontSize: 12 }}>{hace(c.detectado_en || c.creado)}</span>
         </div>
         <div className="hook">{c.hook || c.titulo}</div>
+        <Viralidad c={c} />
         {c.ia?.razon && <div className="suave" style={{ fontSize: 12 }}>IA: {c.ia.razon}</div>}
         <div className="fila" style={{ gap: 4, marginTop: 6 }}>
           {(c.senales || []).map((s) => <span key={s} className="chip">{s}</span>)}
           {c.ia?.encuadre && <span className="chip">{c.ia.encuadre}</span>}
+          {c.ia?.categoria && <span className="chip">{c.ia.categoria}</span>}
           {c.duracion && <span className="chip">{Math.round(c.duracion)} s</span>}
         </div>
         <div className="fila" style={{ gap: 4, marginTop: 6 }}>
@@ -125,6 +159,7 @@ function Tarjeta({ c, email }) {
 export default function Clips({ email }) {
   const [filtro, setFiltro] = useState("revisar");
   const [clips, setClips] = useState([]);
+  const [orden, setOrden] = useState("nuevos");
   useEffect(() => {
     const estados = FILTROS.find((f) => f[0] === filtro)[2];
     const cargar = () => sb().from("clips").select("*").in("estado", estados).order("creado", { ascending: false }).limit(60)
@@ -139,13 +174,18 @@ export default function Clips({ email }) {
         {FILTROS.map(([id, nom]) => (
           <button key={id} className={`btn chico ${filtro === id ? "prim" : ""}`} onClick={() => setFiltro(id)}>{nom}</button>
         ))}
+        <select value={orden} onChange={(e) => setOrden(e.target.value)} style={{ width: "auto", marginLeft: "auto" }}
+          aria-label="Ordenar clips">
+          <option value="nuevos">Más nuevos primero</option>
+          <option value="virales">Más virales primero</option>
+        </select>
       </div>
       {clips.length === 0 ? (
         <div className="vacio">
           {filtro === "revisar" ? "Nada por revisar. Cuando un canal en vivo tenga un pico, el clip aparece aquí con un sonido." : "No hay clips aquí."}
         </div>
       ) : (
-        <div className="grid">{clips.map((c) => <Tarjeta key={c.id + c.estado} c={c} email={email} />)}</div>
+        <div className="grid">{(orden === "virales" ? [...clips].sort((a, b) => (viralDe(b) ?? -1) - (viralDe(a) ?? -1)) : clips).map((c) => <Tarjeta key={c.id + c.estado} c={c} email={email} />)}</div>
       )}
     </>
   );
