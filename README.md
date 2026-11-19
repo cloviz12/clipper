@@ -20,9 +20,22 @@ supabase/   Base de datos compartida (migraciones)
 1. En GitHub ve a **Releases** y descarga `CLIPPER-Setup-x.y.z.exe`. El compañero tiene que estar
    agregado como colaborador del repo para poder verlo.
 2. Instálalo. No pide administrador y trae ffmpeg, el descargador y todo lo demás adentro.
-3. La primera vez la app pide los datos de **Esta PC**: la URL y las llaves de Supabase (obligatorias)
-   y, si quieren, las llaves de Claude, Google y TikTok. Esos datos se guardan solo en esa computadora.
-4. Crea tu cuenta. La primera cuenta queda como dueña; desde **Equipo** agrega el correo del compañero.
+
+**El dueño (el que tiene Supabase y las cuentas de los canales) entra primero:**
+
+3. Elige **Soy el dueño: configurar desde cero** y llena la URL y las llaves de Supabase y, si quiere,
+   las de Claude, Google y TikTok.
+4. Crea su cuenta (la primera cuenta queda como dueña).
+5. En **Equipo** agrega el correo del compañero y le manda el **código de invitación** (botón *Copiar código*).
+
+**El compañero, después:**
+
+6. Elige **Me invitaron: tengo un código**, pega el código y crea su cuenta con el correo que el dueño agregó.
+7. CLIPPER recibe solo las llaves del dueño y se reinicia listo. No tiene que llenar nada más.
+
+El código solo lleva la dirección del proyecto y la llave pública; las llaves secretas se entregan
+únicamente a quien inicia sesión con un correo de la lista de Equipo. Si el dueño cambia una llave en
+*Esta PC*, a los demás les llega sola la próxima vez que abran CLIPPER.
 
 Al cerrar la ventana, CLIPPER sigue en la bandeja (junto al reloj) vigilando y publicando. Para salir
 del todo se usa el menú de la bandeja. En *Esta PC* se puede dejar que abra solo al prender el PC.

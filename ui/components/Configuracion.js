@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { local } from "@/lib/local";
+import { leerCodigo } from "@/lib/invitacion";
 
 const CAMPOS = [
   ["supabase_url", "URL del proyecto de Supabase", "https://xxxx.supabase.co", true],
@@ -18,6 +19,8 @@ export default function Configuracion({ inicial, onListo }) {
   const [d, setD] = useState({});
   const [msg, setMsg] = useState("");
   const [motor, setMotor] = useState(null);
+  const [modo, setModo] = useState(inicial ? null : "dueno");
+  const [codigo, setCodigo] = useState("");
   useEffect(() => {
     local("/api/configuracion").then(setD).catch(() => {});
     if (!inicial) local("/api/motor").then(setMotor).catch(() => {});
@@ -32,12 +35,59 @@ export default function Configuracion({ inicial, onListo }) {
       setMsg(String(err.message || err));
     }
   }
+  async function unirme(e) {
+    e.preventDefault();
+    try {
+      await local("/api/configuracion", { ...leerCodigo(codigo), nombre_motor: d.nombre_motor || "" });
+      onListo?.();
+    } catch (err) {
+      setMsg(String(err.message || err));
+    }
+  }
+  if (modo === null) {
+    return (
+      <div className="login caja" style={{ maxWidth: 520 }}>
+        <div className="logo" style={{ marginBottom: 6 }}>CLIP<span>PER</span></div>
+        <h2>¿Cómo vas a usar CLIPPER?</h2>
+        <button className="btn prim" style={{ width: "100%", marginTop: 8 }} onClick={() => setModo("invitado")}>
+          Me invitaron: tengo un código
+        </button>
+        <p className="suave" style={{ fontSize: 13 }}>Tu compañero ya configuró todo. Solo pegas el código y entras con tu correo.</p>
+        <button className="btn" style={{ width: "100%", marginTop: 8 }} onClick={() => setModo("dueno")}>
+          Soy el dueño: configurar desde cero
+        </button>
+        <p className="suave" style={{ fontSize: 13 }}>Tienes el proyecto de Supabase y las llaves de las redes.</p>
+      </div>
+    );
+  }
+  if (modo === "invitado") {
+    return (
+      <form className="login caja" style={{ maxWidth: 520 }} onSubmit={unirme}>
+        <div className="logo" style={{ marginBottom: 6 }}>CLIP<span>PER</span></div>
+        <h2>Unirme a mi equipo</h2>
+        <p className="suave" style={{ marginTop: 0 }}>
+          Pídele a tu compañero el código: está en su CLIPPER, pestaña <b>Equipo</b>. Y que agregue ahí tu correo.
+        </p>
+        <label>Código de invitación *</label>
+        <textarea rows={4} required value={codigo} placeholder="CLIPPER-..." style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
+          onChange={(e) => setCodigo(e.target.value)} />
+        <label>Nombre de esta PC en el panel</label>
+        <input placeholder="Ej: pc-juan" value={d.nombre_motor ?? ""} onChange={(e) => setD({ ...d, nombre_motor: e.target.value })} />
+        <div className="fila" style={{ marginTop: 16 }}>
+          <button className="btn prim" type="submit">Continuar</button>
+          <button className="btn" type="button" onClick={() => { setModo(null); setMsg(""); }}>Volver</button>
+        </div>
+        {msg && <p className="suave">{msg}</p>}
+      </form>
+    );
+  }
   return (
     <form className={inicial ? "login caja" : "caja"} style={{ maxWidth: 640 }} onSubmit={guardar}>
       {inicial && <div className="logo" style={{ marginBottom: 6 }}>CLIP<span>PER</span></div>}
       <h2>{inicial ? "Configurar esta PC" : "Esta PC"}</h2>
       <p className="suave" style={{ marginTop: 0 }}>
-        Los dos usan el mismo proyecto de Supabase para ver los mismos clips. Estos datos se guardan solo en esta computadora.
+        Los dos usan el mismo proyecto de Supabase para ver los mismos clips. Las llaves se comparten solas con tu equipo
+        (solo con los correos de la pestaña Equipo), así tus compañeros no tienen que llenarlas.
         Las llaves secretas quedan ocultas; déjalas vacías para no cambiarlas.
       </p>
       {CAMPOS.map(([k, nom, ph, req, secreto]) => (
@@ -60,6 +110,7 @@ export default function Configuracion({ inicial, onListo }) {
       </label>
       <div className="fila" style={{ marginTop: 16 }}>
         <button className="btn prim" type="submit">Guardar</button>
+        {inicial && <button className="btn" type="button" onClick={() => setModo(null)}>Volver</button>}
         <span className="suave">{msg}</span>
       </div>
       {motor && (

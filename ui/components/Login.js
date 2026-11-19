@@ -2,10 +2,10 @@
 import { useState } from "react";
 import { sb } from "@/lib/supabase";
 
-export default function Login() {
+export default function Login({ invitado }) {
   const [email, setEmail] = useState("");
   const [clave, setClave] = useState("");
-  const [modo, setModo] = useState("entrar");
+  const [modo, setModo] = useState(invitado ? "crear" : "entrar");
   const [msg, setMsg] = useState("");
   async function enviar(e) {
     e.preventDefault();
@@ -18,6 +18,12 @@ export default function Login() {
   return (
     <div className="login caja">
       <div className="logo" style={{ marginBottom: 14 }}>CLIP<span>PER</span></div>
+      {invitado && (
+        <p className="suave" style={{ marginTop: 0 }}>
+          Usa el mismo correo que tu compañero agregó en <b>Equipo</b>. Si es tu primera vez, crea tu cuenta;
+          al entrar, CLIPPER recibe solo todo lo demás.
+        </p>
+      )}
       <form onSubmit={enviar}>
         <label>Correo</label>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />

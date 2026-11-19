@@ -49,6 +49,26 @@ class Servidor:
         except Exception:
             return None
 
+    def unirse(self, token):
+        """PC invitada: con la sesion del companero baja las llaves que el dueno dejo en el equipo."""
+        c = self.leer_config()
+        if not token or not c.get("supabase_url"):
+            raise ValueError("Primero inicia sesión")
+        r = requests.post(c["supabase_url"].rstrip("/") + "/rest/v1/rpc/config_del_equipo", json={}, timeout=30,
+                          headers={"apikey": c["supabase_anon"], "Authorization": f"Bearer {token}"})
+        if r.status_code == 404:
+            raise ValueError("Falta preparar Supabase: tu compañero tiene que correr la migración "
+                             "20261120000000_config_equipo.sql")
+        r.raise_for_status()
+        datos = r.json()
+        if datos is None:
+            raise ValueError("Tu correo todavía no está en el equipo. Pídele a tu compañero que lo agregue en "
+                             "la pestaña Equipo y vuelve a intentar.")
+        if not (datos or {}).get("supabase_service"):
+            raise ValueError("Tu compañero todavía no ha compartido sus llaves. Pídele que abra CLIPPER "
+                             "(versión nueva) una vez y vuelve a intentar.")
+        self.guardar_config({k: v for k, v in datos.items() if isinstance(v, str)})
+
     def guardar_cuenta(self, red, cuenta, datos):
         self._admin().table("cuentas").upsert({"plataforma": red, "cuenta": cuenta, "datos": datos,
                                                "conectado": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}).execute()
@@ -166,9 +186,11 @@ class Servidor:
                         return self._json(403, {"error": "solo desde la app"})
                     c = srv.leer_config()
                     if ruta == "/api/config":
-                        ok = bool(c.get("supabase_url") and c.get("supabase_anon") and c.get("supabase_service"))
-                        return self._json(200, {"configurado": ok, "supabase_url": c.get("supabase_url"),
-                                                "supabase_anon": c.get("supabase_anon")})
+                        # configurado: ya sabe a que proyecto entrar. completo: ya tiene las llaves para trabajar
+                        # (un invitado pega solo el codigo y recibe el resto al iniciar sesion)
+                        return self._json(200, {"configurado": bool(c.get("supabase_url") and c.get("supabase_anon")),
+                                                "completo": bool(c.get("supabase_service")),
+                                                "supabase_url": c.get("supabase_url"), "supabase_anon": c.get("supabase_anon")})
                     if ruta == "/api/configuracion":
                         pub = {k: v for k, v in c.items() if k not in srv.secretos}
                         pub.update({f"{k}_guardada": bool(c.get(k)) for k in srv.secretos})
@@ -207,6 +229,10 @@ class Servidor:
                 try:
                     if ruta == "/api/configuracion":
                         srv.guardar_config(datos)
+                        threading.Timer(0.8, srv.reiniciar).start()
+                        return self._json(200, {"ok": True})
+                    if ruta == "/api/unirse":
+                        srv.unirse(datos.get("token"))
                         threading.Timer(0.8, srv.reiniciar).start()
                         return self._json(200, {"ok": True})
                     if ruta == "/api/mostrar":

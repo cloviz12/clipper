@@ -56,10 +56,51 @@ def guardar_config(nueva):
         actual[k] = v.strip() if isinstance(v, str) else v
     CONFIG.write_text(json.dumps(actual, indent=1), encoding="utf-8")
     iniciar_con_windows(bool(actual.get("iniciar_con_windows")))
+    if configurado(actual):
+        try:
+            subir_al_equipo(actual)
+        except Exception as e:
+            print("no pude compartir las llaves con el equipo:", e)
     return actual
 
 
 SECRETOS = {"supabase_service", "anthropic_key", "google_client_secret", "tiktok_client_secret"}
+# lo que el dueno llena una vez y los companeros invitados reciben solos (tabla config_equipo)
+COMPARTIDOS = ("supabase_service", "anthropic_key", "google_client_id", "google_client_secret",
+               "tiktok_client_key", "tiktok_client_secret")
+
+
+def _admin(c):
+    from supabase import create_client
+    return create_client(c["supabase_url"], c["supabase_service"])
+
+
+def subir_al_equipo(c, previo=None):
+    datos = dict(previo or {})
+    datos.update({k: c[k] for k in COMPARTIDOS if c.get(k)})
+    _admin(c).table("config_equipo").upsert({"id": 1, "datos": datos,
+                                             "actualizado": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}).execute()
+
+
+def sincronizar_equipo(c):
+    """Al abrir: toma las llaves que el equipo tenga guardadas (si el dueno cambio alguna, llega sola)
+    y comparte las que esta PC tenga y el equipo aun no."""
+    if not configurado(c):
+        return c
+    try:
+        r = _admin(c).table("config_equipo").select("datos").eq("id", 1).execute()
+        equipo = (r.data[0]["datos"] if r.data else {}) or {}
+        cambio = False
+        for k in COMPARTIDOS:
+            if equipo.get(k) and equipo[k] != c.get(k):
+                c[k], cambio = equipo[k], True
+        if cambio:
+            CONFIG.write_text(json.dumps(c, indent=1), encoding="utf-8")
+        if any(c.get(k) and not equipo.get(k) for k in COMPARTIDOS):
+            subir_al_equipo(c, equipo)
+    except Exception as e:
+        print("no pude sincronizar las llaves del equipo:", e)
+    return c
 
 
 def configurado(c):
@@ -159,7 +200,7 @@ def bandeja(salir):
 
 
 def main():
-    c = leer_config()
+    c = sincronizar_equipo(leer_config())
     from servidor import Servidor
     srv = Servidor(PUERTO, UI, leer_config, guardar_config, reiniciar, estado, VERSION, CARPETA,
                    al_mostrar=mostrar, secretos=SECRETOS)
