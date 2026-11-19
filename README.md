@@ -10,7 +10,8 @@ ajustes a través de Supabase, así que cualquiera puede aprobar o publicar desd
 ```
 app/        App de escritorio: ventana + bandeja + servidor local + instalador
 ui/         Pantallas de la app (Next.js exportado como archivos estáticos)
-worker/     Motor: vigila directos, edita y publica (va dentro de la app; también corre en Docker)
+worker/     Motor: vigila directos, edita y publica (va dentro de la app y en el servidor)
+servidor/   Instalación del motor en un servidor 24/7 (Docker + actualización sola)
 supabase/   Base de datos compartida (migraciones)
 .github/    GitHub construye el instalador solo y lo publica en Releases
 ```
@@ -38,6 +39,26 @@ se crea un tag de versión sobre `main`:
 ```
 git tag v1.0.1 && git push origin v1.0.1
 ```
+
+## Motor en la nube (sin depender de ningún PC)
+
+Con la app basta **un** PC prendido; el otro puede estar apagado. Para no depender de ninguno, el motor
+se puede dejar en un servidor 24/7. Cuando el servidor está encendido, él vigila los directos y hace
+los pedidos; los PCs se quedan solo para manejar y aprobar (y retoman el trabajo si el servidor se cae).
+
+1. Conseguir un servidor Linux (Ubuntu). Opción gratis: Oracle Cloud *Always Free* con una instancia
+   **Ampere A1 de 2 OCPU y 12 GB**. Con 2 núcleos conviene poner *Precisión de subtítulos = base* en
+   Ajustes para que edite más rápido.
+2. Entrar por SSH y correr (con el token de GitHub de solo lectura):
+   ```
+   curl -fsSL -H "Authorization: Bearer TU_TOKEN" https://raw.githubusercontent.com/cloviz12/clipper/main/servidor/instalar.sh | sudo GITHUB_TOKEN=TU_TOKEN bash
+   ```
+   Pide las llaves una vez y deja el motor corriendo siempre.
+3. Se actualiza solo: cada 10 minutos revisa `main` y, si cambió, se reconstruye.
+
+YouTube a veces bloquea las descargas desde servidores. Si pasa, se exportan las cookies de una sesión
+de YouTube (formato *cookies.txt*) y se copian al servidor en
+`/var/lib/docker/volumes/servidor_datos/_data/cookies_youtube.txt`. Twitch y Kick no tienen ese problema.
 
 ## Preparar Supabase (una sola vez)
 

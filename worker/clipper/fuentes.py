@@ -2,6 +2,7 @@
 SIN bajar el video completo: 'lo mas visto' de YouTube, chat del directo, subtitulos y, como
 ultimo recurso, solo el audio en baja calidad."""
 import json
+import os
 import re
 import subprocess
 
@@ -43,6 +44,9 @@ def clasificar(url):
 
 def ydl(extra=None):
     o = {"quiet": True, "no_warnings": True, "noplaylist": True, "socket_timeout": 30, "retries": 5}
+    galletas = os.environ.get("YTDLP_COOKIES")
+    if galletas and os.path.exists(galletas):
+        o["cookiefile"] = galletas      # ayuda a que YouTube no bloquee las descargas desde un servidor
     o.update(extra or {})
     return yt_dlp.YoutubeDL(o)
 

@@ -1,0 +1,18 @@
+# Motor de CLIPPER en un servidor (24/7, sin que ningun PC tenga que estar prendido).
+services:
+  motor:
+    build: ../worker
+    container_name: clipper-motor
+    restart: always
+    env_file: ../worker/.env
+    environment:
+      WORKER_NOMBRE: ${WORKER_NOMBRE:-servidor}
+      CLIPPER_PRIORIDAD: "1"
+      YTDLP_COOKIES: /datos/cookies_youtube.txt
+    volumes:
+      - datos:/datos
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
+volumes:
+  datos:
