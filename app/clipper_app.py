@@ -64,7 +64,7 @@ def guardar_config(nueva):
     return actual
 
 
-SECRETOS = {"supabase_service", "anthropic_key", "google_client_secret", "tiktok_client_secret"}
+SECRETOS = {"supabase_service", "anthropic_key", "google_client_secret", "tiktok_client_secret", "github_token"}
 # lo que el dueno llena una vez y los companeros invitados reciben solos (tabla config_equipo)
 COMPARTIDOS = ("supabase_service", "anthropic_key", "google_client_id", "google_client_secret",
                "tiktok_client_key", "tiktok_client_secret")
@@ -167,6 +167,44 @@ def encender_motor(c):
         print("el motor no arranco:", e)
 
 
+# ------------------------------------------------------------------ actualizaciones
+_tok = {"t": 0, "v": None}
+
+
+def token_github():
+    """Token de solo lectura del repo (privado). Se guarda una vez en Supabase y lo usan todas las PCs."""
+    c = leer_config()
+    if c.get("github_token"):
+        return c["github_token"]
+    if time.time() - _tok["t"] < 600:
+        return _tok["v"]
+    _tok["t"] = time.time()
+    try:
+        from supabase import create_client
+        r = create_client(c["supabase_url"], c["supabase_service"]).table("secretos").select("valor") \
+            .eq("clave", "github_token").execute()
+        _tok["v"] = r.data[0]["valor"] if r.data else None
+    except Exception:
+        pass
+    return _tok["v"]
+
+
+def ocupado():
+    try:
+        import main as motor
+        return bool(motor.estado.get("editando")) or motor.cola.qsize() > 0
+    except Exception:
+        return False
+
+
+def antes_de_actualizar():
+    try:
+        import main as motor
+        motor.apagar()
+    except Exception:
+        pass
+
+
 # ------------------------------------------------------------------ ventana y bandeja
 ventana = {"w": None}
 
@@ -202,10 +240,14 @@ def bandeja(salir):
 def main():
     c = sincronizar_equipo(leer_config())
     from servidor import Servidor
+    from actualizador import Actualizador
+    act = Actualizador(VERSION, CARPETA, token_github, ocupado, antes_de_actualizar, CONGELADO)
     srv = Servidor(PUERTO, UI, leer_config, guardar_config, reiniciar, estado, VERSION, CARPETA,
-                   al_mostrar=mostrar, secretos=SECRETOS)
+                   al_mostrar=mostrar, secretos=SECRETOS, actualizador=act)
     srv.arrancar()
     encender_motor(c)
+    if configurado(c) and c.get("actualizar_solo", True):
+        act.arrancar()
 
     import webview
 

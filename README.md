@@ -10,7 +10,8 @@ ajustes a través de Supabase, así que cualquiera puede aprobar o publicar desd
 ```
 app/        App de escritorio: ventana + bandeja + servidor local + instalador
 ui/         Pantallas de la app (Next.js exportado como archivos estáticos)
-worker/     Motor: vigila directos, edita y publica (va dentro de la app; también corre en Docker)
+worker/     Motor: vigila directos, edita y publica (va dentro de la app y en el servidor)
+servidor/   Instalación del motor en un servidor 24/7 (Docker + actualización sola)
 supabase/   Base de datos compartida (migraciones)
 .github/    GitHub construye el instalador solo y lo publica en Releases
 ```
@@ -43,18 +44,43 @@ del todo se usa el menú de la bandeja. En *Esta PC* se puede dejar que abra sol
 **Dos PCs a la vez:** cada canal en vivo lo vigila una sola PC. Si esa se apaga, la otra lo toma en
 menos de 2 minutos. Los pedidos y las publicaciones también se reparten sin repetirse.
 
-## Sacar una versión nueva
+## Actualizaciones automáticas
 
-Cada PR construye el instalador y lo deja como *artifact* para probarlo. Para publicarlo en Releases
-se crea un tag de versión sobre `main`:
+Cada vez que se mergea algo a `main`, GitHub construye el instalador, lo prueba y lo publica en
+**Releases** como versión `1.0.N`. Las apps instaladas revisan cada 30 minutos; si hay versión nueva la
+bajan y la instalan en silencio cuando no hay ningún clip editándose, y vuelven a abrir solas en la
+bandeja.
 
-```
-git tag v1.0.1 && git push origin v1.0.1
-```
+Como el repo es privado, la app necesita un token de GitHub de solo lectura para ver las versiones.
+Se pega una sola vez en *Esta PC → Actualizaciones* y queda guardado en Supabase para las dos PCs.
+Para crearlo: GitHub → Settings → Developer settings → **Fine-grained tokens** → *Generate new token* →
+*Only select repositories: clipper* → permiso **Contents: Read-only**.
+
+Cada PR también construye el instalador y lo publica en Releases como *pre-release* de prueba, para probarlo antes de mergear. Las apps instaladas no se actualizan a esas versiones de prueba.
+
+## Motor en la nube (sin depender de ningún PC)
+
+Con la app basta **un** PC prendido; el otro puede estar apagado. Para no depender de ninguno, el motor
+se puede dejar en un servidor 24/7. Cuando el servidor está encendido, él vigila los directos y hace
+los pedidos; los PCs se quedan solo para manejar y aprobar (y retoman el trabajo si el servidor se cae).
+
+1. Conseguir un servidor Linux (Ubuntu). Opción gratis: Oracle Cloud *Always Free* con una instancia
+   **Ampere A1 de 2 OCPU y 12 GB**. Con 2 núcleos conviene poner *Precisión de subtítulos = base* en
+   Ajustes para que edite más rápido.
+2. Entrar por SSH y correr (con el token de GitHub de solo lectura):
+   ```
+   curl -fsSL -H "Authorization: Bearer TU_TOKEN" https://raw.githubusercontent.com/cloviz12/clipper/main/servidor/instalar.sh | sudo GITHUB_TOKEN=TU_TOKEN bash
+   ```
+   Pide las llaves una vez y deja el motor corriendo siempre.
+3. Se actualiza solo: cada 10 minutos revisa `main` y, si cambió, se reconstruye.
+
+YouTube a veces bloquea las descargas desde servidores. Si pasa, se exportan las cookies de una sesión
+de YouTube (formato *cookies.txt*) y se copian al servidor en
+`/var/lib/docker/volumes/servidor_datos/_data/cookies_youtube.txt`. Twitch y Kick no tienen ese problema.
 
 ## Preparar Supabase (una sola vez)
 
-Crear un proyecto y correr en orden las migraciones de `supabase/migrations`, ya sea con
+Crear un proyecto y correr en orden todas las migraciones de `supabase/migrations`, ya sea con
 `supabase link` + `supabase db push` o pegándolas en el SQL Editor. En *Authentication → Providers →
 Email* dejar activo el registro con correo.
 
