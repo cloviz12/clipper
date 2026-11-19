@@ -2,6 +2,7 @@ supabase>=2.10
 yt-dlp[default]
 streamlink>=7
 faster-whisper
+av<17   # versiones nuevas de PyAV (probado en 19) rompen faster-whisper: metadata_errors
 chat-downloader
 opencv-python-headless
 numpy
