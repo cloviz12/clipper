@@ -29,6 +29,8 @@ def editar():
         except Exception as e:
             log(f"no pude editar el clip de {ctx.get('canal')}: {str(e)[:400]}", "error")
             traceback.print_exc()
+            if ctx.get("trabajo_id"):
+                fallos_por_trabajo.setdefault(ctx["trabajo_id"], []).append(str(e))
         finally:
             arch.unlink(missing_ok=True)
             estado["editando"] = None
@@ -37,13 +39,27 @@ def editar():
 
 
 pendientes_por_trabajo = {}
+totales_por_trabajo = {}
+fallos_por_trabajo = {}
 
 
 def _cerrar_trabajo_si_toca(tid):
     pendientes_por_trabajo[tid] = pendientes_por_trabajo.get(tid, 1) - 1
-    if pendientes_por_trabajo[tid] <= 0:
-        sb().table("trabajos").update({"estado": "terminado", "terminado": datetime.now(timezone.utc).isoformat(),
-                                       "progreso": "listo: revisa los clips"}).eq("id", tid).execute()
+    if pendientes_por_trabajo[tid] > 0:
+        return
+    pendientes_por_trabajo.pop(tid, None)
+    total = totales_por_trabajo.pop(tid, 0)
+    fallos = fallos_por_trabajo.pop(tid, [])
+    ahora = datetime.now(timezone.utc).isoformat()
+    if fallos and len(fallos) >= max(total, 1):
+        # no salio ningun clip: que se vea como error y no como "terminado"
+        cambios = {"estado": "error", "terminado": ahora, "progreso": "no se pudo editar ningun clip",
+                   "error": fallos[0][:500]}
+    else:
+        aviso = f" ({len(fallos)} de {total} fallaron)" if fallos else ""
+        cambios = {"estado": "terminado", "terminado": ahora, "error": None,
+                   "progreso": "listo: revisa los clips" + aviso}
+    sb().table("trabajos").update(cambios).eq("id", tid).execute()
 
 
 def pedidos():
@@ -64,6 +80,7 @@ def pedidos():
                                                "terminado": datetime.now(timezone.utc).isoformat()}).eq("id", t["id"]).execute()
             else:
                 pendientes_por_trabajo[t["id"]] = pendientes_por_trabajo.get(t["id"], 0) + n
+                totales_por_trabajo[t["id"]] = totales_por_trabajo.get(t["id"], 0) + n
                 progreso(f"{n} momentos en edicion...")
         except Exception as e:
             log(f"pedido fallo: {str(e)[:400]}", "error")
