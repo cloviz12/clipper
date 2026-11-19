@@ -52,7 +52,7 @@ class Pedido:
             self._encolar({"archivo": arch, "canal": canal, "origen": "video", "url_fuente": base, "inicio": 0,
                            "titulo_fuente": inf.get("title", ""), "pico": None, "puntaje": 0.5, "senales": ["clip completo"]})
             return
-        senales, cues, charla = {}, [], None
+        senales, cues, charla, clips = {}, [], None, None
         hm = F.senal_heatmap(inf, dur)
         if hm is not None:
             senales["heatmap"] = hm
@@ -64,7 +64,12 @@ class Pedido:
             charla = F.senal_chat(base, dur)
             if charla:
                 senales["chat"] = charla[0]
-        if senales.get("heatmap") is None and senales.get("chat") is None:
+        if "twitch" in inf.get("extractor_key", "").lower():
+            self.progreso(f"{canal}: buscando donde saco clip la gente...")
+            clips = F.senal_clips_vod(inf, dur)
+            if clips:
+                senales["clips"] = clips[0]
+        if senales.get("heatmap") is None and senales.get("chat") is None and senales.get("clips") is None:
             self.progreso(f"{canal}: analizando solo el audio...")
             try:
                 senales["audio"] = F.senal_audio(url, dur, slug(vid, 30))
@@ -89,16 +94,23 @@ class Pedido:
             # el pico real dentro del tramo
             seg = score[int(a):int(b) + 1]
             pico = float(seg.argmax()) if len(seg) and seg.max() > 0 else None
-            extra = {}
+            etiquetas, motivos, extra = list(usadas), [], {}
+            if clips:
+                gente = {c for t, c in clips[1] if a <= t <= b + 5}
+                if len(gente) >= 2:
+                    etiquetas.insert(0, f"{len(gente)} clips de la comunidad a la vez")
+                    motivos.append(f"{len(gente)} personas sacaron clip de este momento")
             if charla:
                 _, prep, crudos = charla
                 lect = reacciones.leer([m for m in prep if a <= m[0] <= b],
                                        reacciones.palabras_normales([m for m in prep if a - 300 <= m[0] < a]))
-                extra = {"senales": usadas + lect.etiquetas(), "reaccion_chat": lect.describir(),
-                         "chat": [x for t, x in crudos if a <= t <= b][-40:]}
+                etiquetas += lect.etiquetas()
+                motivos.append(lect.describir())
+                extra["chat"] = [x for t, x in crudos if a <= t <= b][-40:]
+            extra["reaccion_chat"] = "; ".join(m for m in motivos if m)
             self._encolar({"archivo": arch, "canal": canal, "origen": "vod" if inf.get("was_live") else "video",
                            "url_fuente": uf, "inicio": a, "titulo_fuente": inf.get("title", ""), "pico": pico,
-                           "puntaje": float(val), "senales": usadas, **extra})
+                           "puntaje": float(val), "senales": etiquetas, **extra})
             hechos += 1
 
     def destacados(self, url):

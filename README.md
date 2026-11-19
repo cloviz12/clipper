@@ -67,10 +67,14 @@ Email* dejar activo el registro con correo.
   cuentan. El audio suma cuando hay gritos o risas.
 - Cada clip lleva en el panel qué hizo el chat (por ejemplo `chat: risa (62%)` o
   `chat habla de «gato»`) y la IA usa eso para escribir el hook y el título.
-- En Twitch también toma los clips que la gente va creando.
+- En Twitch y Kick vigila cada 20 s los clips que crea la gente. Si **varias personas distintas
+  sacan clip al mismo tiempo** (menos de 45 s entre uno y otro), es un momento seguro: lo corta de la
+  grabación propia, en mejor calidad y con la reacción completa, y en el panel sale
+  `3 clips de la comunidad a la vez`. Un clip suelto se usa tal cual si nadie más clipea lo mismo.
 
 **Pedidos:** busca los picos sin bajar el video completo (en VODs con chat usa la misma lectura de
-risas y temas) y baja en Full HD solo esos tramos. Para
+risas y temas; en VODs de Twitch también busca dónde sacó clip la gente, y los tramos que clipearon
+varias personas pesan más que cualquier otra señal) y baja en Full HD solo esos tramos. Para
 encontrarlos usa la curva de "lo más visto" de YouTube, el chat, los subtítulos o, como último
 recurso, solo el audio.
 

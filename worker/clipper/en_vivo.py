@@ -3,7 +3,8 @@
 - escucha el chat y mide el volumen del audio segundo a segundo
 - cuando el chat y/o el audio explotan frente a lo normal del directo, corta ese momento
   (lo de antes + la reaccion) y lo manda a editar al instante
-- en Twitch, ademas, toma al momento los clips que la gente va creando"""
+- en Twitch y Kick vigila los clips que crea la gente: si varias personas clipean lo mismo a la vez,
+  corta ese momento de la grabacion propia (mejor calidad y con la reaccion completa)"""
 import statistics
 import subprocess
 import threading
@@ -19,6 +20,8 @@ from .base import BUFFER, TRABAJO, _sin_ventana, ajustes, log, parse_rango, slug
 REACCION_S = 5          # lo que tarda el chat en reaccionar a lo que vio
 GUARDAR_S = 360         # minutos de buffer que se guardan
 ESPERA_INICIAL = 90     # segundos para aprender lo "normal" del directo
+RAFAGA_S = 45           # clips creados con menos de esto entre si son del mismo momento
+RAFAGA_MIN = 2          # personas distintas clipeando lo mismo = momento seguro
 
 
 class Monitor(threading.Thread):
@@ -39,6 +42,8 @@ class Monitor(threading.Thread):
         self.inicio = time.time()
         self.procs = []
         self.clips_vistos = set()
+        self.clips_pend = []       # clips nuevos de la comunidad que aun no usamos
+        self.momentos = []         # segundos epoch de los momentos que ya cortamos
         self.cortes = 0
 
     # ------------------------------------------------------------ grabacion
@@ -163,12 +168,13 @@ class Monitor(threading.Thread):
                 continue
             p, zc, za = self._puntaje(ahora)
             umbral = 4.0 * float(self.f.get("sensibilidad") or 1.0)
-            if p >= umbral:
+            if p >= umbral and not self._ya_cortado(ahora - REACCION_S):
                 self.ultimo_corte = ahora
                 momento = ahora - REACCION_S
+                self.momentos.append(momento)
                 threading.Thread(target=self._cortar, args=(momento, p, zc, za), daemon=True).start()
 
-    def _cortar(self, momento, p, zc, za):
+    def _cortar(self, momento, p, zc, za, extra=None):
         lmin, lmax = parse_rango(self.f.get("opciones", {}).get("duracion") or ajustes().get("duracion_clip"))
         L = (lmin + lmax) / 2
         antes, despues = L * 0.7, L * 0.3
@@ -193,51 +199,98 @@ class Monitor(threading.Thread):
             lista.unlink(missing_ok=True)
         self.cortes += 1
         lect = self.chat.lectura(momento - 6, momento + despues)
-        que = lect.describir()
+        extra = extra or {}
+        que = "; ".join(x for x in (extra.get("motivo"), lect.describir()) if x)
         log(f"PICO en {self.canal} (fuerza {p:.1f}: chat {zc:.1f}, audio {za:.1f})"
             f"{' — ' + que if que else ''} — editando", "pico")
         self.cola.put((0, time.time(), {
             "archivo": salida, "canal": self.canal, "origen": "en_vivo", "url_fuente": self.url_vivo,
             "titulo_fuente": self.titulo, "pico": antes, "puntaje": min(1.0, p / 10),
-            "senales": ["chat", "audio"] + lect.etiquetas(), "reaccion_chat": que,
+            "senales": extra.get("senales", ["chat", "audio"]) + lect.etiquetas(), "reaccion_chat": que,
             "chat": self.chat.textos_entre(momento - 10, momento + despues), "fuente": self.f,
             "detectado_en": datetime.fromtimestamp(momento, timezone.utc).isoformat()}))
 
-    # ------------------------------------------------------------ clips que crea la gente (Twitch)
-    def _clips_twitch(self):
+    # ------------------------------------------------------------ clips que crea la gente (Twitch y Kick)
+    def _ya_cortado(self, momento, margen=40):
+        return any(abs(m - momento) < margen for m in self.momentos)
+
+    def _grupos(self):
+        """Junta los clips pendientes que se crearon casi al mismo tiempo (mismo momento del directo)."""
+        grupos = []
+        for c in sorted(self.clips_pend, key=lambda c: c["ts"]):
+            if grupos and c["ts"] - grupos[-1][-1]["ts"] <= RAFAGA_S:
+                grupos[-1].append(c)
+            else:
+                grupos.append([c])
+        return grupos
+
+    def _revisar_clips(self, ahora):
+        usados = set()
+        for g in self._grupos():
+            gente = {c.get("creador") or c["id"] for c in g}
+            momento = min(c["ts"] for c in g) - 3          # se clipea justo despues de ver el momento
+            if len(gente) >= RAFAGA_MIN:
+                usados |= {c["id"] for c in g}
+                if self._ya_cortado(momento) or ahora - momento > GUARDAR_S - 40:
+                    continue
+                self.momentos.append(momento)
+                self.ultimo_corte = ahora
+                motivo = f"{len(gente)} personas sacaron clip al mismo tiempo"
+                log(f"{self.canal}: {motivo} — corto ese momento", "pico")
+                threading.Thread(target=self._cortar, daemon=True, args=(momento, 6.0 + len(gente), 0.0, 0.0, {
+                    "senales": [f"{len(gente)} clips de la comunidad a la vez", "chat", "audio"],
+                    "motivo": motivo})).start()
+            elif ahora - g[-1]["ts"] > RAFAGA_S + 10:
+                # nadie mas lo clipeo: igual vale, pero se usa el clip tal cual (si no lo cortamos ya)
+                usados |= {c["id"] for c in g}
+                if not self._ya_cortado(momento, 60):
+                    self.momentos.append(momento)
+                    self._usar_clip(g[0])
+        self.clips_pend = [c for c in self.clips_pend if c["id"] not in usados and ahora - c["ts"] < GUARDAR_S]
+
+    def _usar_clip(self, c):
+        try:
+            from .render_tramo import bajar
+            arch = bajar(c["url"], nombre=f"clip_{slug(str(c['id']), 30)}")
+        except Exception as e:
+            log(f"{self.canal}: no pude bajar el clip {c['url']} ({str(e)[:150]})", "aviso")
+            return
+        log(f"{self.canal}: clip nuevo de la comunidad '{c['titulo'][:50]}' — editando", "pico")
+        self.cola.put((0, time.time(), {
+            "archivo": arch, "canal": self.canal, "origen": f"clip_{self.plat}", "url_fuente": c["url"],
+            "titulo_fuente": c["titulo"] or self.titulo, "pico": None, "puntaje": 0.7,
+            "senales": ["clip de la comunidad"], "chat": self.chat.textos_entre(c["ts"] - 40, c["ts"] + 10),
+            "fuente": self.f}))
+
+    def _clips_comunidad(self):
+        leer = F.clips_recientes_twitch if self.plat == "twitch" else F.clips_recientes_kick
         primero = True
         while self.vivo:
+            ahora = time.time()
             try:
-                for c in F.clips_recientes_twitch(self.canal, 20):
+                for c in leer(self.canal, 30):
                     if c["id"] in self.clips_vistos:
                         continue
                     self.clips_vistos.add(c["id"])
                     if primero:
                         continue                       # los que ya existian al empezar no cuentan
-                    if time.time() - self.ultimo_corte < 60:
-                        continue                       # ese momento ya lo cortamos nosotros
-                    self.ultimo_corte = time.time()
-                    from .render_tramo import bajar
-                    arch = bajar(c["url"], nombre=f"twclip_{slug(c['id'], 30)}")
-                    log(f"{self.canal}: clip nuevo de la comunidad '{c['titulo'][:50]}' — editando", "pico")
-                    self.cola.put((0, time.time(), {
-                        "archivo": arch, "canal": self.canal, "origen": "clip_twitch", "url_fuente": c["url"],
-                        "titulo_fuente": c["titulo"] or self.titulo, "pico": None, "puntaje": 0.7,
-                        "senales": ["clip de la comunidad"], "chat": self.chat.textos_entre(time.time() - 60, time.time()),
-                        "fuente": self.f}))
+                    c["ts"] = min(ahora, c.get("ts") or ahora)
+                    self.clips_pend.append(c)
                 primero = False
+                self._revisar_clips(ahora)
             except Exception as e:
                 log(f"{self.canal}: no pude leer clips nuevos ({str(e)[:150]})", "aviso")
-            time.sleep(40)
+            time.sleep(20)
 
     # ------------------------------------------------------------
     def run(self):
         log(f"EN VIVO: {self.canal} ({self.plat}) — {self.titulo[:80]}", "vivo")
         if self.plat == "twitch":
             chatmod.twitch(self.canal, self.chat)
-            threading.Thread(target=self._clips_twitch, daemon=True).start()
+            threading.Thread(target=self._clips_comunidad, daemon=True).start()
         elif self.plat == "kick":
             chatmod.kick(self.canal, self.chat)
+            threading.Thread(target=self._clips_comunidad, daemon=True).start()
         elif self.plat == "youtube":
             chatmod.youtube(self.url_vivo, self.chat)
         threading.Thread(target=self._medir_audio, daemon=True).start()
