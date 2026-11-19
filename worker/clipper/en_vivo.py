@@ -6,7 +6,6 @@
 - en Twitch, ademas, toma al momento los clips que la gente va creando"""
 import statistics
 import subprocess
-import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -15,7 +14,7 @@ import numpy as np
 
 from . import chat as chatmod
 from . import fuentes as F
-from .base import BUFFER, TRABAJO, ajustes, log, parse_rango, slug, tool
+from .base import BUFFER, TRABAJO, _sin_ventana, ajustes, log, parse_rango, slug, tool
 
 REACCION_S = 5          # lo que tarda el chat en reaccionar a lo que vio
 GUARDAR_S = 360         # minutos de buffer que se guardan
@@ -44,28 +43,45 @@ class Monitor(threading.Thread):
 
     # ------------------------------------------------------------ grabacion
     def _grabar(self):
+        """Lee el directo con streamlink (dentro de la app, sin programas aparte) y lo parte en pedacitos."""
         seg = str(self.dir / "%Y%m%d-%H%M%S.ts")
-        ff = [tool("ffmpeg"), "-v", "error", "-i", "pipe:0", "-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy",
-              "-f", "segment", "-segment_time", "4", "-reset_timestamps", "1", "-strftime", "1", seg]
-        sl = [sys.executable, "-m", "streamlink", "--stdout", "--retry-streams", "5", "--retry-max", "3",
-              "--hls-live-edge", "2", "--stream-segment-threads", "2"]
-        if self.plat == "twitch":
-            sl += ["--twitch-disable-ads", "--twitch-low-latency"]
-        sl += [self.url_vivo, "1080p60,1080p,936p60,720p60,720p,best"]
+        salida = ["-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy", "-f", "segment", "-segment_time", "4",
+                  "-reset_timestamps", "1", "-strftime", "1", seg]
         try:
-            a = subprocess.Popen(sl, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            b = subprocess.Popen(ff, stdin=a.stdout, stderr=subprocess.DEVNULL)
-            self.procs = [a, b]
-            b.wait()
-        except Exception as e:
-            log(f"{self.canal}: streamlink no pudo ({e}); pruebo directo con yt-dlp", "aviso")
-        if not self.vivo:
+            from streamlink import Streamlink
+            ses = Streamlink()
+            ses.set_option("hls-live-edge", 2)
+            ses.set_option("stream-segment-threads", 2)
+            streams = ses.streams(self.url_vivo)
+            st = next((streams[q] for q in ("1080p60", "1080p", "936p60", "720p60", "720p", "best") if q in streams), None)
+            if st is None:
+                raise RuntimeError("streamlink no encontro calidades")
+            ff = subprocess.Popen([tool("ffmpeg"), "-v", "error", "-i", "pipe:0"] + salida,
+                                  stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, **_sin_ventana())
+            self.procs = [ff]
+            fd = st.open()
+            try:
+                while self.vivo:
+                    data = fd.read(65536)
+                    if not data:
+                        break
+                    ff.stdin.write(data)
+            finally:
+                fd.close()
+                try:
+                    ff.stdin.close()
+                except Exception:
+                    pass
+                ff.wait(timeout=20)
             return
-        # respaldo: URL HLS que da yt-dlp, la lee ffmpeg directo
+        except Exception as e:
+            if not self.vivo:
+                return
+            log(f"{self.canal}: streamlink no pudo ({str(e)[:150]}); pruebo directo con yt-dlp", "aviso")
         try:
             with F.ydl({"format": "best[height<=1080]/best"}) as y:
                 url = y.extract_info(self.url_vivo, download=False)["url"]
-            b = subprocess.Popen([tool("ffmpeg"), "-v", "error", "-i", url] + ff[6:], stderr=subprocess.DEVNULL)
+            b = subprocess.Popen([tool("ffmpeg"), "-v", "error", "-i", url] + salida, stderr=subprocess.DEVNULL, **_sin_ventana())
             self.procs = [b]
             b.wait()
         except Exception as e:

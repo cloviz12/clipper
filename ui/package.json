@@ -1,5 +1,5 @@
 {
-  "name": "clipper-panel",
+  "name": "clipper-interfaz",
   "private": true,
   "scripts": {
     "dev": "next dev",
