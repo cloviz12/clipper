@@ -80,21 +80,26 @@ def _tt_token(d):
     return d["access_token"]
 
 
-def subir_tiktok(video, clip, aj):
+def subir_tiktok(video, clip, aj, post=None):
+    """post = lo que la persona confirmo en la pestana TikTok (privacidad, interacciones, divulgacion).
+    Sin post se manda como borrador a la bandeja de TikTok (la persona termina de publicar en la app)."""
     d = _cuenta("tiktok")["datos"]
     H = {"Authorization": f"Bearer {_tt_token(d)}", "Content-Type": "application/json; charset=UTF-8"}
     size = video.stat().st_size
     chunk = size if size <= 64 * 1024 * 1024 else 10 * 1024 * 1024
     n = 1 if chunk == size else math.floor(size / chunk)
     src = {"source": "FILE_UPLOAD", "video_size": size, "chunk_size": chunk, "total_chunk_count": n}
-    caption = clip["textos"].get("tiktok", {}).get("caption") or clip.get("titulo") or ""
-    if aj.get("tiktok_modo", "borrador") == "directo":
-        info = requests.post(f"{TT}/v2/post/publish/creator_info/query/", headers=H, timeout=30).json()
-        niveles = info.get("data", {}).get("privacy_level_options") or ["SELF_ONLY"]
-        priv = "PUBLIC_TO_EVERYONE" if "PUBLIC_TO_EVERYONE" in niveles else niveles[0]
+    if post:
+        info = requests.post(f"{TT}/v2/post/publish/creator_info/query/", headers=H, timeout=30).json().get("data", {})
+        if post.get("privacy_level") not in (info.get("privacy_level_options") or []):
+            raise RuntimeError("la privacidad elegida ya no está disponible en la cuenta: vuelve a confirmarlo")
         r = requests.post(f"{TT}/v2/post/publish/video/init/", headers=H, timeout=60, json={
-            "post_info": {"title": caption[:2150], "privacy_level": priv, "disable_duet": False,
-                          "disable_comment": False, "disable_stitch": False},
+            "post_info": {"title": (post.get("title") or "")[:2200], "privacy_level": post["privacy_level"],
+                          "disable_comment": bool(post.get("disable_comment", True) or info.get("comment_disabled")),
+                          "disable_duet": bool(post.get("disable_duet", True) or info.get("duet_disabled")),
+                          "disable_stitch": bool(post.get("disable_stitch", True) or info.get("stitch_disabled")),
+                          "brand_content_toggle": bool(post.get("brand_content_toggle")),
+                          "brand_organic_toggle": bool(post.get("brand_organic_toggle"))},
             "source_info": src}).json()
     else:
         r = requests.post(f"{TT}/v2/post/publish/inbox/video/init/", headers=H, json={"source_info": src}, timeout=60).json()
@@ -183,6 +188,19 @@ def publicar_siguiente():
         sb().table("clips").update({"estado": "error", "errores": {"general": "no hay redes conectadas para este clip"}}).eq("id", clip["id"]).execute()
         log("no hay redes conectadas: conecta las cuentas en el panel", "error")
         return True
+    # TikTok directo: TikTok exige que una persona confirme cada video. Queda esperando en la pestana TikTok
+    esperando_tt = False
+    if "tiktok" in plats and aj.get("tiktok_modo", "borrador") == "directo":
+        plats.remove("tiktok")
+        if not clip.get("tiktok"):
+            sb().table("clips").update({"tiktok": {"estado": "esperando"}}).eq("id", clip["id"]).execute()
+            log(f"TikTok: '{clip.get('hook') or clip.get('titulo')}' espera confirmación en la pestaña TikTok", "info",
+                clip=clip["id"])
+        esperando_tt = True
+    if not plats:
+        # solo faltaba TikTok: queda 'programado' sin hora hasta que se confirme
+        sb().table("clips").update({"estado": "programado", "publicar_en": None}).eq("id", clip["id"]).execute()
+        return True
     video = _archivo(clip)
     for p in plats:
         if p in pubs:
@@ -196,8 +214,42 @@ def publicar_siguiente():
             errs[p] = str(e)[:500]
             log(f"{p}: no se pudo publicar ({str(e)[:200]})", "error", clip=clip["id"])
     estado = "publicado" if pubs else "error"
+    if esperando_tt and not pubs:
+        estado = "programado"
     sb().table("clips").update({"estado": estado, "publicaciones": pubs, "errores": errs}).eq("id", clip["id"]).execute()
     video.unlink(missing_ok=True)
+    return True
+
+
+def publicar_tiktok_programado():
+    """Publica en TikTok el siguiente clip confirmado cuya hora ya llego."""
+    if "tiktok" not in conectadas():
+        return False
+    r = sb().rpc("tomar_tiktok", {"p_worker": WORKER}).execute()
+    if not r.data:
+        return False
+    clip = r.data[0]
+    tt = dict(clip.get("tiktok") or {})
+    pubs, errs = dict(clip.get("publicaciones") or {}), dict(clip.get("errores") or {})
+    video = None
+    try:
+        video = _archivo(clip)
+        res = subir_tiktok(video, clip, ajustes(), tt.get("post") or {})
+        res["cuando"] = datetime.now(timezone.utc).isoformat()
+        pubs["tiktok"] = res
+        errs.pop("tiktok", None)
+        tt.update(estado="publicado", resultado=res.get("estado"))
+        log(f"publicado en tiktok: {clip.get('hook') or clip.get('titulo')}", "publicado", clip=clip["id"])
+    except Exception as e:
+        errs["tiktok"] = str(e)[:500]
+        tt.update(estado="error", error=str(e)[:300])
+        log(f"tiktok: no se pudo publicar ({str(e)[:200]})", "error", clip=clip["id"])
+    cambios = {"tiktok": tt, "publicaciones": pubs, "errores": errs}
+    if clip.get("estado") in ("programado", "publicando") and not clip.get("publicar_en"):
+        cambios["estado"] = "publicado" if pubs else "error"
+    sb().table("clips").update(cambios).eq("id", clip["id"]).execute()
+    if video:
+        video.unlink(missing_ok=True)
     return True
 
 
@@ -205,9 +257,12 @@ def limpiar():
     """Borra de la nube los videos ya publicados/descartados despues de unos dias (el plan gratis tiene 1 GB)."""
     dias = int(ajustes().get("dias_guardar_videos", 3))
     limite = datetime.fromtimestamp(time.time() - dias * 86400, timezone.utc).isoformat()
-    r = sb().table("clips").select("id,video_path").in_("estado", ["publicado", "descartado"]) \
+    r = sb().table("clips").select("id,video_path,estado,tiktok").in_("estado", ["publicado", "descartado"]) \
         .lt("creado", limite).not_.is_("video_path", "null").limit(100).execute()
-    if r.data:
-        sb().storage.from_("clips").remove([c["video_path"] for c in r.data])
-        for c in r.data:
+    # los que siguen esperando TikTok no se borran (salvo que se hayan descartado)
+    viejos = [c for c in r.data or [] if c["estado"] == "descartado"
+              or (c.get("tiktok") or {}).get("estado") not in ("esperando", "programado", "publicando")]
+    if viejos:
+        sb().storage.from_("clips").remove([c["video_path"] for c in viejos])
+        for c in viejos:
             sb().table("clips").update({"video_path": None}).eq("id", c["id"]).execute()

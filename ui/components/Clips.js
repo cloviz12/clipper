@@ -11,7 +11,7 @@ const FILTROS = [
 ];
 const urls = {};
 
-async function firmada(path) {
+export async function firmada(path) {
   if (!path) return null;
   if (urls[path] && urls[path].vence > Date.now()) return urls[path].url;
   const { data } = await sb().storage.from("clips").createSignedUrl(path, 3600);
@@ -105,7 +105,9 @@ function Tarjeta({ c, email }) {
               </span>
             );
           })}
-          {c.estado === "programado" && <span className="chip ambar">programado {new Date(c.publicar_en).toLocaleString("es-CO")}</span>}
+          {c.estado === "programado" && c.publicar_en && <span className="chip ambar">programado {new Date(c.publicar_en).toLocaleString("es-CO")}</span>}
+          {c.tiktok?.estado === "esperando" && <span className="chip ambar">TikTok: falta confirmar</span>}
+          {c.tiktok?.estado === "programado" && <span className="chip ambar">TikTok {new Date(c.tiktok.en).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}</span>}
         </div>
 
         {editar && (

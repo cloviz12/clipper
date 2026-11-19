@@ -170,7 +170,9 @@ def publicador():
     ultimo_limpio = 0
     while True:
         try:
-            if not publicar.publicar_siguiente():
+            hizo = publicar.publicar_siguiente()
+            hizo = publicar.publicar_tiktok_programado() or hizo
+            if not hizo:
                 time.sleep(5)
             if time.time() - ultimo_limpio > 3600:
                 ultimo_limpio = time.time()
