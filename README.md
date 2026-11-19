@@ -42,7 +42,7 @@ Se pega una sola vez en *Esta PC → Actualizaciones* y queda guardado en Supaba
 Para crearlo: GitHub → Settings → Developer settings → **Fine-grained tokens** → *Generate new token* →
 *Only select repositories: clipper* → permiso **Contents: Read-only**.
 
-Cada PR también construye el instalador y lo deja como *artifact*, para probarlo antes de mergear.
+Cada PR también construye el instalador y lo publica en Releases como *pre-release* de prueba, para probarlo antes de mergear. Las apps instaladas no se actualizan a esas versiones de prueba.
 
 ## Preparar Supabase (una sola vez)
 
