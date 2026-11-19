@@ -138,6 +138,9 @@ class Monitor(threading.Thread):
             mad = statistics.median([abs(x - base) for x in tramos]) * 1.4826
             actual = sum(serie[-ventana:]) / ventana
             z_chat = (actual - base) / (mad + 0.4 + 0.15 * base)
+        # no basta con que escriban mucho: tienen que estar reaccionando A LO MISMO
+        lect = self.chat.lectura(ahora - 10, ahora)
+        consenso = lect.consenso
         claves = sorted(self.audio)
         z_audio = 0.0
         if len(claves) > 60:
@@ -145,7 +148,12 @@ class Monitor(threading.Thread):
             normal = [self.audio[k] for k in claves if k >= ahora - 180]
             if recientes and normal:
                 z_audio = (max(recientes) - statistics.median(normal)) / 4.0
-        return z_chat + 0.5 * max(0.0, z_audio), z_chat, z_audio
+        fuerza = max(0.0, z_chat) * (0.5 + 1.3 * consenso)
+        if lect.gente >= 6:
+            fuerza += 2.6 * consenso                 # medio chat riendose ya es un momento, aunque sea chico
+            if consenso < 0.15:
+                fuerza *= 0.55                       # mucho texto pero sin reaccion: raid, saludos, spam
+        return fuerza + 0.5 * max(0.0, z_audio), z_chat, z_audio
 
     def _detectar(self):
         while self.vivo:
@@ -184,10 +192,14 @@ class Monitor(threading.Thread):
         finally:
             lista.unlink(missing_ok=True)
         self.cortes += 1
-        log(f"PICO en {self.canal} (fuerza {p:.1f}: chat {zc:.1f}, audio {za:.1f}) — editando", "pico")
+        lect = self.chat.lectura(momento - 6, momento + despues)
+        que = lect.describir()
+        log(f"PICO en {self.canal} (fuerza {p:.1f}: chat {zc:.1f}, audio {za:.1f})"
+            f"{' — ' + que if que else ''} — editando", "pico")
         self.cola.put((0, time.time(), {
             "archivo": salida, "canal": self.canal, "origen": "en_vivo", "url_fuente": self.url_vivo,
-            "titulo_fuente": self.titulo, "pico": antes, "puntaje": min(1.0, p / 10), "senales": ["chat", "audio"],
+            "titulo_fuente": self.titulo, "pico": antes, "puntaje": min(1.0, p / 10),
+            "senales": ["chat", "audio"] + lect.etiquetas(), "reaccion_chat": que,
             "chat": self.chat.textos_entre(momento - 10, momento + despues), "fuente": self.f,
             "detectado_en": datetime.fromtimestamp(momento, timezone.utc).isoformat()}))
 

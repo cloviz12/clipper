@@ -23,7 +23,8 @@ Reglas:
 4. caption_tiktok y caption_instagram: 1-2 lineas naturales distintas entre si + pregunta corta que invite a comentar. Sin hashtags dentro.
 5. hashtags: 4 o 5, siempre el del streamer, el del juego o tema si aplica y 2 de nicho; minusculas, con #.
 6. correcciones: nombres propios o palabras que la transcripcion escribio mal (por el chat o el titulo del directo), como {"mal":"bien"}.
-7. puntaje 0-100: que tan probable es que este clip funcione como Short independiente.
+7. "reaccion_del_chat" dice como reacciono la gente en vivo (si se rio, se sorprendio o de que hablaban todos). Es la mejor pista de que es lo gracioso o fuerte del clip: usala para elegir el hook y el titulo (por ejemplo, si todos hablaban de "el gato", el hook va sobre eso). Si medio chat se rio, el clip casi seguro paga.
+8. puntaje 0-100: que tan probable es que este clip funcione como Short independiente.
 Responde SOLO JSON con: sirve (bool), razon (corta), puntaje (int), hook, titulo_youtube, caption_tiktok, caption_instagram, hashtags (lista), correcciones (objeto)."""
 
 
@@ -51,6 +52,7 @@ def textos(ctx, aj):
         "origen": ctx.get("origen"), "duracion_seg": ctx.get("duracion"),
         "transcripcion": [f"[{f['t']:.1f}s] {f['texto']}" for f in ctx.get("frases", [])][:60],
         "chat_en_ese_momento": ctx.get("chat", [])[:40],
+        "reaccion_del_chat": ctx.get("reaccion_chat") or "",
         "senales": ctx.get("senales"), "segundo_del_pico": ctx.get("pico"),
     }, ensure_ascii=False)
     try:

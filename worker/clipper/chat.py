@@ -1,6 +1,5 @@
 """Escucha el chat del directo EN TIEMPO REAL y guarda cuanta 'reaccion' hay cada segundo."""
 import json
-import re
 import socket
 import threading
 import time
@@ -8,36 +7,40 @@ from collections import deque
 
 import requests
 
-REACCION = re.compile(
-    r"(KEKW|LUL|LULW|OMEGALUL|ICANT|Pog|POGGERS|PogU|monkaS|monkaW|Sadge|xdd|XD+|xD+|jaja\w*|JAJA\w*|"
-    r"ajaj\w*|lmao|LMAO|wtf|WTF|NO+\b|SI+\b|GOO+L|\?\?+|!!+|clip|CLIP|ALV|alv|qu[eé]+ ?|omg|OMG|W\b|L\b)")
-
+from . import reacciones
 
 class Chat:
-    """Cuenta mensajes por segundo (con peso extra por emotes de risa/sorpresa)."""
+    """Guarda el chat de los ultimos minutos ya analizado (quien escribio, si se rio, de que hablo)."""
 
     def __init__(self):
-        self.puntos = deque(maxlen=60 * 30)   # (segundo_epoch, peso)
-        self.textos = deque(maxlen=400)       # (t, texto) para que la IA entienda el momento
+        self.msgs = deque(maxlen=30000)       # preparados: (t, usuario, tipos, palabras)
+        self.textos = deque(maxlen=600)       # (t, texto) para que la IA entienda el momento
         self.vivo = True
         self.mensajes = 0
 
-    def agregar(self, texto):
+    def agregar(self, texto, usuario=None):
         t = time.time()
-        w = 1.0 + 0.5 * min(4, len(REACCION.findall(texto or "")))
-        self.puntos.append((t, w))
+        m = reacciones.preparar(t, usuario, texto)
+        if m is None:
+            return
+        self.msgs.append(m)
         self.textos.append((t, (texto or "")[:200]))
         self.mensajes += 1
 
+    def _entre(self, a, b):
+        return [m for m in list(self.msgs) if a <= m[0] < b]
+
     def serie(self, desde, hasta):
-        """Suma de pesos por segundo entre dos tiempos epoch."""
+        """Personas distintas escribiendo en cada segundo (el spam de uno solo cuenta una vez)."""
         n = max(1, int(hasta - desde))
-        s = [0.0] * n
-        for t, w in list(self.puntos):
-            i = int(t - desde)
-            if 0 <= i < n:
-                s[i] += w
-        return s
+        s = [set() for _ in range(n)]
+        for t, u, _, _ in self._entre(desde, hasta):
+            s[int(t - desde)].add(u)
+        return [float(len(x)) for x in s]
+
+    def lectura(self, a, b, antes=300):
+        """Que paso en el chat entre a y b, comparado con lo normal de los minutos previos."""
+        return reacciones.leer(self._entre(a, b), reacciones.palabras_normales(self._entre(a - antes, a)))
 
     def textos_entre(self, a, b, maximo=40):
         return [x for t, x in list(self.textos) if a <= t <= b][-maximo:]
@@ -66,7 +69,8 @@ def twitch(canal, chat):
                         if l.startswith("PING"):
                             s.sendall(b"PONG :tmi.twitch.tv\r\n")
                         elif " PRIVMSG " in l:
-                            chat.agregar(l.split(" :", 1)[-1])
+                            quien = l[1:].split("!", 1)[0] if l.startswith(":") else None
+                            chat.agregar(l.split(" :", 1)[-1], quien)
                 s.close()
             except Exception:
                 time.sleep(5)
@@ -94,7 +98,7 @@ def kick(canal, chat):
                         ws.send(json.dumps({"event": "pusher:pong", "data": {}}))
                     elif "ChatMessage" in m.get("event", ""):
                         d = json.loads(m["data"]) if isinstance(m.get("data"), str) else m.get("data", {})
-                        chat.agregar(d.get("content", ""))
+                        chat.agregar(d.get("content", ""), (d.get("sender") or {}).get("username"))
             except Exception:
                 time.sleep(5)
     threading.Thread(target=bucle, daemon=True, name=f"chat-kick-{canal}").start()
@@ -107,7 +111,7 @@ def youtube(url_video, chat):
             for m in ChatDownloader().get_chat(url_video, message_types=["text_message", "paid_message"]):
                 if not chat.vivo:
                     break
-                chat.agregar(m.get("message") or "")
+                chat.agregar(m.get("message") or "", (m.get("author") or {}).get("name"))
         except Exception:
             pass
     threading.Thread(target=bucle, daemon=True, name="chat-youtube").start()

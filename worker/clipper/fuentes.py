@@ -9,6 +9,7 @@ import numpy as np
 import yt_dlp
 import yt_dlp.networking
 
+from . import reacciones
 from .base import TRABAJO, log, tool
 
 PALABRAS_DEFECTO = [
@@ -17,9 +18,6 @@ PALABRAS_DEFECTO = [
     r"\bomg\b", r"no way", r"oh my god", r"\bwhat\b", r"risas", r"aplausos", r"laughter", r"applause",
     r"gritos?", r"\bclip\b",
 ]
-EMOTES_CHAT = r"(KEKW|LUL|LULW|OMEGALUL|PogChamp|Pog|POGGERS|monkaS|Kappa|jaja|JAJA|xD|XD|lmao|LMAO|W+\b|\?\?+|!!+|clip|CLIP)"
-
-
 def clasificar(url):
     u = url.strip()
     if re.search(r"twitch\.tv/videos/\d+", u):
@@ -186,28 +184,29 @@ def senal_palabras(cues, dur, extra):
 
 
 def senal_chat(url, dur):
-    """Densidad de mensajes del chat (directos de Twitch y YouTube)."""
+    """Chat del directo (Twitch y YouTube): gente distinta reaccionando a lo mismo, segundo a segundo.
+    Devuelve (serie, preparados, crudos) o None; los mensajes sirven para explicar cada momento."""
     try:
         from chat_downloader import ChatDownloader
     except Exception:
         return None
-    s = np.zeros(int(dur) + 1)
-    rx = re.compile(EMOTES_CHAT)
-    n = 0
+    prep, crudos = [], []
     try:
         for m in ChatDownloader().get_chat(url, message_types=["text_message"]):
             t = m.get("time_in_seconds")
             if t is None or t < 0 or t > dur:
                 continue
-            w = 1.0 + 0.6 * len(rx.findall(m.get("message") or ""))
-            s[int(t)] += w
-            n += 1
+            x = m.get("message") or ""
+            p = reacciones.preparar(float(t), (m.get("author") or {}).get("name"), x)
+            if p:
+                prep.append(p)
+                crudos.append((float(t), x[:200]))
     except Exception as e:
         log(f"    chat no disponible ({type(e).__name__})")
-    if n < 50:
+    if len(prep) < 50:
         return None
-    log(f"    chat leido: {n} mensajes")
-    return s
+    log(f"    chat leido: {len(prep)} mensajes de {len({p[1] for p in prep})} personas")
+    return reacciones.serie(prep, dur), prep, crudos
 
 
 def senal_audio(url, dur, vid):

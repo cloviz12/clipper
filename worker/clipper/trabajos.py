@@ -3,7 +3,7 @@ Encuentra los mejores momentos SIN bajar el video completo y manda cada tramo a 
 import time
 
 from . import fuentes as F
-from . import momentos
+from . import momentos, reacciones
 from .base import ajustes, hms, log, parse_rango, sb, slug
 from .render_tramo import bajar
 
@@ -52,7 +52,7 @@ class Pedido:
             self._encolar({"archivo": arch, "canal": canal, "origen": "video", "url_fuente": base, "inicio": 0,
                            "titulo_fuente": inf.get("title", ""), "pico": None, "puntaje": 0.5, "senales": ["clip completo"]})
             return
-        senales, cues = {}, []
+        senales, cues, charla = {}, [], None
         hm = F.senal_heatmap(inf, dur)
         if hm is not None:
             senales["heatmap"] = hm
@@ -61,7 +61,9 @@ class Pedido:
             senales["palabras"] = F.senal_palabras(cues, dur, [])
         if inf.get("was_live") or inf.get("live_status") == "was_live" or "twitch" in inf.get("extractor_key", "").lower():
             self.progreso(f"{canal}: leyendo el chat del directo...")
-            senales["chat"] = F.senal_chat(base, dur)
+            charla = F.senal_chat(base, dur)
+            if charla:
+                senales["chat"] = charla[0]
         if senales.get("heatmap") is None and senales.get("chat") is None:
             self.progreso(f"{canal}: analizando solo el audio...")
             try:
@@ -87,9 +89,16 @@ class Pedido:
             # el pico real dentro del tramo
             seg = score[int(a):int(b) + 1]
             pico = float(seg.argmax()) if len(seg) and seg.max() > 0 else None
+            extra = {}
+            if charla:
+                _, prep, crudos = charla
+                lect = reacciones.leer([m for m in prep if a <= m[0] <= b],
+                                       reacciones.palabras_normales([m for m in prep if a - 300 <= m[0] < a]))
+                extra = {"senales": usadas + lect.etiquetas(), "reaccion_chat": lect.describir(),
+                         "chat": [x for t, x in crudos if a <= t <= b][-40:]}
             self._encolar({"archivo": arch, "canal": canal, "origen": "vod" if inf.get("was_live") else "video",
                            "url_fuente": uf, "inicio": a, "titulo_fuente": inf.get("title", ""), "pico": pico,
-                           "puntaje": float(val), "senales": usadas})
+                           "puntaje": float(val), "senales": usadas, **extra})
             hechos += 1
 
     def destacados(self, url):
