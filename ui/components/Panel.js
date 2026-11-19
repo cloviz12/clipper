@@ -10,10 +10,11 @@ import Sonidos from "./Sonidos";
 import Ajustes from "./Ajustes";
 import Equipo from "./Equipo";
 import Registro from "./Registro";
+import Configuracion from "./Configuracion";
 
 const PESTANAS = [
   ["clips", "Clips"], ["vivo", "En vivo"], ["pedidos", "Pedidos"], ["cuentas", "Cuentas"],
-  ["sonidos", "Sonidos"], ["ajustes", "Ajustes"], ["equipo", "Equipo"], ["registro", "Registro"],
+  ["sonidos", "Sonidos"], ["ajustes", "Ajustes"], ["equipo", "Equipo"], ["registro", "Registro"], ["pc", "Esta PC"],
 ];
 
 function pitido() {
@@ -98,7 +99,7 @@ export default function Panel({ sesion }) {
           {vivos.length
             ? <>Motor encendido{enVivo.length ? ` · en vivo: ${enVivo.join(", ")}` : ""}{editando.length ? ` · editando ${editando.join(", ")}` : ""}{cola ? ` · ${cola} en cola` : ""}</>
             : <>Motor apagado{workers[0] ? ` (visto ${hace(workers[0].visto)})` : ""}</>}
-          <button className="btn chico" onClick={() => sb().auth.signOut()}>Salir</button>
+          <button className="btn chico" onClick={() => sb().auth.signOut()}>Cerrar sesión</button>
         </div>
       </div>
       <main>
@@ -111,6 +112,7 @@ export default function Panel({ sesion }) {
         {pestana === "ajustes" && <Ajustes />}
         {pestana === "equipo" && <Equipo email={sesion.user.email} />}
         {pestana === "registro" && <Registro />}
+        {pestana === "pc" && <Configuracion />}
       </main>
     </>
   );

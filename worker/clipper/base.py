@@ -21,7 +21,7 @@ TRABAJO = DATOS / "trabajo"
 BUFFER = DATOS / "buffer"
 SFX_DIR = DATOS / "sfx"
 MODELOS = DATOS / "modelos"
-FUENTES_TXT = RAIZ / "fuentes_letra"
+FUENTES_TXT = Path(os.environ.get("CLIPPER_LETRAS", RAIZ / "fuentes_letra"))
 for d in (TRABAJO, BUFFER, SFX_DIR, MODELOS):
     d.mkdir(parents=True, exist_ok=True)
 
@@ -37,6 +37,20 @@ def _cargar_env():
 
 
 _cargar_env()
+# En Windows, ningun ffmpeg/yt-dlp abre ventanas negras (la app no tiene consola)
+if os.name == "nt":
+    _popen_init = subprocess.Popen.__init__
+
+    def _popen_sin_ventana(self, *a, **k):
+        k.setdefault("creationflags", 0x08000000)
+        _popen_init(self, *a, **k)
+    subprocess.Popen.__init__ = _popen_sin_ventana
+
+
+def _sin_ventana():
+    return {}
+
+
 _links = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links"
 if _links.exists():
     os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + str(_links)

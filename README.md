@@ -1,93 +1,88 @@
 # CLIPPER
 
-Clips de streamers en tiempo real: detecta el momento, lo edita como Short (subtítulos animados, hook,
-encuadre por caras, zooms, sacudidas, destellos y efectos de sonido) y lo publica en YouTube Shorts,
-TikTok e Instagram Reels. Se maneja entre dos (o más) personas desde un panel web.
+App de escritorio (Windows) para sacar clips de streamers en tiempo real. Detecta el momento, lo
+edita como Short y lo publica en YouTube Shorts, TikTok e Instagram Reels. La edición incluye
+subtítulos animados, hook, encuadre por caras, zooms, sacudidas, destellos y efectos de sonido.
+
+Cada persona del equipo instala la app en su PC. Las dos apps comparten los mismos clips, canales y
+ajustes a través de Supabase, así que cualquiera puede aprobar o publicar desde su computadora.
 
 ```
-web/        Panel (Next.js) → se despliega en Vercel
-worker/     Motor (Python) → corre solo, sin ventanas, en un PC o en un servidor (Docker)
-supabase/   Base de datos, archivos y tiempo real (una migración)
+app/        App de escritorio: ventana + bandeja + servidor local + instalador
+ui/         Pantallas de la app (Next.js exportado como archivos estáticos)
+worker/     Motor: vigila directos, edita y publica (va dentro de la app; también corre en Docker)
+supabase/   Base de datos compartida (migraciones)
+.github/    GitHub construye el instalador solo y lo publica en Releases
 ```
 
-## Cómo funciona
+## Instalar
 
-**En vivo (tiempo real).** El motor revisa cada 30 s los canales de la pestaña *En vivo*. Cuando uno
-prende directo:
+1. En GitHub ve a **Releases** y descarga `CLIPPER-Setup-x.y.z.exe`. El compañero tiene que estar
+   agregado como colaborador del repo para poder verlo.
+2. Instálalo. No pide administrador y trae ffmpeg, el descargador y todo lo demás adentro.
+3. La primera vez la app pide los datos de **Esta PC**: la URL y las llaves de Supabase (obligatorias)
+   y, si quieren, las llaves de Claude, Google y TikTok. Esos datos se guardan solo en esa computadora.
+4. Crea tu cuenta. La primera cuenta queda como dueña; desde **Equipo** agrega el correo del compañero.
 
-1. Graba solo los últimos 6 minutos en pedacitos de ~4 s (buffer circular, nunca el directo completo).
-2. Escucha el chat (Twitch por IRC anónimo, Kick por su websocket, YouTube por su chat en vivo) y
-   mide el volumen del audio segundo a segundo.
-3. Aprende lo que es "normal" en ese directo y, cuando el chat (KEKW, JAJA, "clip", ???) y/o el audio
-   se disparan, corta ~70 % antes del pico y ~30 % después (la reacción), y lo manda a editar.
-4. En Twitch, además, toma al instante los clips nuevos que la gente va creando.
+Al cerrar la ventana, CLIPPER sigue en la bandeja (junto al reloj) vigilando y publicando. Para salir
+del todo se usa el menú de la bandeja. En *Esta PC* se puede dejar que abra solo al prender el PC.
 
-La sensibilidad se ajusta por canal en el panel (0.5 = más clips, 2 = solo picos enormes).
+**Dos PCs a la vez:** cada canal en vivo lo vigila una sola PC. Si esa se apaga, la otra lo toma en
+menos de 2 minutos. Los pedidos y las publicaciones también se reparten sin repetirse.
 
-**Pedidos.** Un link de video, VOD o canal. Busca los picos sin bajar el video: la curva de "lo más
-visto" de YouTube, el chat del directo, los subtítulos y, como último recurso, solo el audio en baja
-calidad. Después baja en Full HD únicamente esos tramos.
+## Sacar una versión nueva
 
-**Edición (cada clip).**
-- Whisper transcribe palabra por palabra (con el nombre del canal y el título del directo como pista).
-- Quita el arranque muerto (si nadie habla al inicio).
-- La IA (Claude, opcional) decide si el clip se entiende solo, le pone puntaje, escribe el hook en
-  pantalla (verdadero y que el clip paga), el título de Shorts con palabras que se buscan, captions
-  distintos para TikTok e Instagram, 4-5 hashtags, y corrige nombres mal escritos en los subtítulos.
-- Encuadre: si hay facecam pequeña → cámara arriba + juego abajo; si la cámara es grande → recorte
-  9:16 que sigue la cara; si no hay caras → video completo sobre fondo desenfocado.
-- Efectos de cámara en los golpes (pico del chat, picos de audio, palabras fuertes): zoom de golpe,
-  sacudida y destello, más un zoom de entrada.
-- Efectos de sonido: whoosh de entrada, pop con el hook, impacto/glitch en cada golpe, riser antes del
-  momento y cierre. El motor fabrica los suyos (sin derechos de por medio) y usa primero los que suban
-  en la pestaña *Sonidos*, rotándolos para que no suenen iguales.
-- Subtítulos animados (palabra activa resaltada, palabras fuertes más grandes y con color de acento),
-  máximo 2 líneas, dentro de la zona segura; la letra y los colores cambian de clip a clip.
-- Audio normalizado a -14 LUFS, H.264 1080×1920.
+Cada PR construye el instalador y lo deja como *artifact* para probarlo. Para publicarlo en Releases
+se crea un tag de versión sobre `main`:
 
-**Publicación.** Cada canal puede ir en *avisarnos para aprobar* (llega al panel con sonido y
-notificación; "Publicar ya" en un toque) o *automático* (publica solo si la IA le da el puntaje mínimo
-de Ajustes). También se puede programar a una hora.
+```
+git tag v1.0.1 && git push origin v1.0.1
+```
 
-## Puesta en marcha
+## Preparar Supabase (una sola vez)
 
-### 1. Supabase
-Crear un proyecto y correr la migración `supabase/migrations/20261118000000_inicio.sql`
-(con la CLI: `supabase link` + `supabase db push`, o pegándola en el SQL Editor).
-En *Authentication → Providers → Email* dejar activo el registro con correo.
+Crear un proyecto y correr en orden las migraciones de `supabase/migrations`, ya sea con
+`supabase link` + `supabase db push` o pegándolas en el SQL Editor. En *Authentication → Providers →
+Email* dejar activo el registro con correo.
 
-### 2. Panel en Vercel
-Importar el repo con **Root Directory = `web`** y poner las variables de `web/.env.example`.
-La primera cuenta que se cree en el panel queda como dueña; desde *Equipo* se agrega el correo del
-compañero y él se registra con ese correo.
+## Conectar las redes (pestaña Cuentas)
 
-URLs de regreso para las apps de las redes (cambiar por el dominio real):
-- Google Cloud (YouTube Data API v3, cliente web): `https://DOMINIO/api/oauth/youtube/callback`
-- TikTok for Developers (Login Kit + Content Posting API): `https://DOMINIO/api/oauth/tiktok/callback`
-- Meta (Instagram API con inicio de sesión de Instagram): `https://DOMINIO/api/oauth/instagram/callback`
+- **YouTube:** en Google Cloud se crea un cliente OAuth de tipo **App de escritorio** con la YouTube
+  Data API v3 activada. El Client ID y el secret van en *Esta PC*. Al darle Conectar se abre tu navegador.
+- **TikTok:** en TikTok for Developers se crea una app con Login Kit + Content Posting API y la
+  plataforma **Desktop**, con el redirect `http://127.0.0.1:47821/api/oauth/tiktok/callback`. El
+  Client key y el secret van en *Esta PC*.
+- **Instagram:** necesita una cuenta profesional. En la app de Meta (*Instagram API con inicio de
+  sesión de Instagram*) se genera el token y se pega en la pestaña Cuentas.
 
-Luego en el panel, pestaña *Cuentas*, botón **Conectar** en cada red.
+## Cómo trabaja el motor
 
-### 3. Motor
-Copiar `worker/.env.example` como `worker/.env` y llenarlo (la `SUPABASE_SERVICE_ROLE_KEY` es secreta:
-solo va aquí y en Vercel).
+**En vivo:**
+- Graba solo los últimos 6 minutos del directo en pedacitos de 4 s.
+- Escucha el chat (Twitch, Kick y YouTube) y mide el audio segundo a segundo.
+- Cuando el chat o el audio se disparan frente a lo normal de ese directo, corta el momento con su
+  reacción y lo edita al instante.
+- En Twitch también toma los clips que la gente va creando.
 
-- **En Windows:** doble clic una sola vez a `worker/INSTALAR_EN_WINDOWS.bat`. Instala todo y deja el
-  motor corriendo en segundo plano, sin ventanas, y arrancando solo cada vez que se prende el PC.
-  `ACTUALIZAR_EN_WINDOWS.bat` lo reinicia con la última versión.
-- **En un servidor:** `docker build -t clipper-motor worker && docker run -d --restart=always --env-file worker/.env -v clipper:/datos clipper-motor`.
-  YouTube suele bloquear descargas desde servidores; para YouTube conviene el motor en un PC de casa.
+**Pedidos:** busca los picos sin bajar el video completo y baja en Full HD solo esos tramos. Para
+encontrarlos usa la curva de "lo más visto" de YouTube, el chat, los subtítulos o, como último
+recurso, solo el audio.
 
-Pueden correr varios motores a la vez (uno en el PC y otro en un servidor): se reparten los pedidos
-sin repetirse. El estado de cada motor se ve arriba a la derecha del panel.
+**Edición:**
+- Transcribe palabra por palabra con Whisper.
+- Con IA (si hay llave de Claude): hook verdadero, título con búsquedas, captions por red, hashtags,
+  juicio de si el clip se entiende solo y corrección de nombres en los subtítulos.
+- Encuadre según las caras: facecam arriba + juego abajo, seguir la cara, o fondo desenfocado.
+- Zooms de golpe con sacudida y destello.
+- Efectos de sonido: los propios del motor o los que suban en *Sonidos*.
+- Subtítulos que cambian de letra y color en cada clip.
+- Audio a -14 LUFS, video 1080×1920.
 
 ## Límites que hay que saber
-- **YouTube:** los videos subidos por la API desde una app sin auditar quedan privados hasta que Google
-  apruebe la app.
-- **TikTok:** sin la auditoría de TikTok solo se publica privado; por eso el modo por defecto es
-  *borrador* (llega a la bandeja de la app para publicarlo con un toque).
-- **Supabase gratis:** 1 GB de archivos. El motor borra los videos ya publicados o descartados después
-  de los días que digan los Ajustes (3 por defecto).
-- Resubir clips de otros creadores puede traer reclamos de derechos: lo más seguro es trabajar con
-  streamers que lo permitan o que tengan programa de clippers. Cada publicación lleva el crédito y el
-  enlace al original.
+
+- **YouTube:** lo que se sube por la API queda privado hasta que Google apruebe la app (auditoría).
+- **TikTok:** sin la auditoría de TikTok llega como borrador a la bandeja de la app.
+- **Supabase gratis:** tiene 1 GB de archivos. La app borra los videos ya publicados o descartados a
+  los días que digan los Ajustes.
+- **Derechos:** resubir clips de otros puede traer reclamos. Cada publicación lleva el crédito y el
+  enlace al original; lo más seguro es trabajar con streamers que lo permitan.
