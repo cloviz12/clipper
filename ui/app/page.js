@@ -5,6 +5,7 @@ import { local } from "@/lib/local";
 import Login from "@/components/Login";
 import Panel from "@/components/Panel";
 import Configuracion from "@/components/Configuracion";
+import Unirse from "@/components/Unirse";
 
 export default function Inicio() {
   const [conf, setConf] = useState(null);
@@ -27,7 +28,8 @@ export default function Inicio() {
   if (!conf) return null;
   if (!conf.configurado) return <Configuracion inicial onListo={() => window.location.reload()} />;
   if (sesion === undefined) return null;
-  if (!sesion) return <Login />;
+  if (!sesion) return <Login invitado={!conf.completo} />;
+  if (!conf.completo) return <Unirse sesion={sesion} />;
   return (
     <Suspense fallback={null}>
       <Panel sesion={sesion} />
