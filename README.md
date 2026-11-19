@@ -60,11 +60,21 @@ Email* dejar activo el registro con correo.
 **En vivo:**
 - Graba solo los últimos 6 minutos del directo en pedacitos de 4 s.
 - Escucha el chat (Twitch, Kick y YouTube) y mide el audio segundo a segundo.
-- Cuando el chat o el audio se disparan frente a lo normal de ese directo, corta el momento con su
-  reacción y lo edita al instante.
-- En Twitch también toma los clips que la gente va creando.
+- Lee el chat como una persona: no cuenta mensajes, cuenta **gente distinta reaccionando a lo mismo**.
+  Corta cuando buena parte del chat se ríe a la vez (KEKW, jajaja, xd, ICANT...), se sorprende
+  (WTF, QUEEE, ???, NOOO), explota de hype (GOOOL, VAMOS) o se pone a hablar de una misma cosa
+  ("el gato", "penal"...). Un raid saludando, el spam de una sola persona, los bots y los comandos no
+  cuentan. El audio suma cuando hay gritos o risas.
+- Cada clip lleva en el panel qué hizo el chat (por ejemplo `chat: risa (62%)` o
+  `chat habla de «gato»`) y la IA usa eso para escribir el hook y el título.
+- En Twitch y Kick vigila cada 20 s los clips que crea la gente. Si **varias personas distintas
+  sacan clip al mismo tiempo** (menos de 45 s entre uno y otro), es un momento seguro: lo corta de la
+  grabación propia, en mejor calidad y con la reacción completa, y en el panel sale
+  `3 clips de la comunidad a la vez`. Un clip suelto se usa tal cual si nadie más clipea lo mismo.
 
-**Pedidos:** busca los picos sin bajar el video completo y baja en Full HD solo esos tramos. Para
+**Pedidos:** busca los picos sin bajar el video completo (en VODs con chat usa la misma lectura de
+risas y temas; en VODs de Twitch también busca dónde sacó clip la gente, y los tramos que clipearon
+varias personas pesan más que cualquier otra señal) y baja en Full HD solo esos tramos. Para
 encontrarlos usa la curva de "lo más visto" de YouTube, el chat, los subtítulos o, como último
 recurso, solo el audio.
 

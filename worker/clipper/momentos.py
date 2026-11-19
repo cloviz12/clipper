@@ -1,7 +1,7 @@
 """Combina las senales y escoge las ventanas (clips) con mas 'momento'."""
 import numpy as np
 
-PESOS = {"heatmap": 1.0, "chat": 0.9, "audio": 0.6, "palabras": 0.45}
+PESOS = {"heatmap": 1.0, "clips": 1.2, "chat": 0.9, "audio": 0.6, "palabras": 0.45}
 
 
 def _norm(s):

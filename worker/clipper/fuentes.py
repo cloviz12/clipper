@@ -9,6 +9,7 @@ import numpy as np
 import yt_dlp
 import yt_dlp.networking
 
+from . import reacciones
 from .base import TRABAJO, log, tool
 
 PALABRAS_DEFECTO = [
@@ -17,9 +18,6 @@ PALABRAS_DEFECTO = [
     r"\bomg\b", r"no way", r"oh my god", r"\bwhat\b", r"risas", r"aplausos", r"laughter", r"applause",
     r"gritos?", r"\bclip\b",
 ]
-EMOTES_CHAT = r"(KEKW|LUL|LULW|OMEGALUL|PogChamp|Pog|POGGERS|monkaS|Kappa|jaja|JAJA|xD|XD|lmao|LMAO|W+\b|\?\?+|!!+|clip|CLIP)"
-
-
 def clasificar(url):
     u = url.strip()
     if re.search(r"twitch\.tv/videos/\d+", u):
@@ -186,28 +184,29 @@ def senal_palabras(cues, dur, extra):
 
 
 def senal_chat(url, dur):
-    """Densidad de mensajes del chat (directos de Twitch y YouTube)."""
+    """Chat del directo (Twitch y YouTube): gente distinta reaccionando a lo mismo, segundo a segundo.
+    Devuelve (serie, preparados, crudos) o None; los mensajes sirven para explicar cada momento."""
     try:
         from chat_downloader import ChatDownloader
     except Exception:
         return None
-    s = np.zeros(int(dur) + 1)
-    rx = re.compile(EMOTES_CHAT)
-    n = 0
+    prep, crudos = [], []
     try:
         for m in ChatDownloader().get_chat(url, message_types=["text_message"]):
             t = m.get("time_in_seconds")
             if t is None or t < 0 or t > dur:
                 continue
-            w = 1.0 + 0.6 * len(rx.findall(m.get("message") or ""))
-            s[int(t)] += w
-            n += 1
+            x = m.get("message") or ""
+            p = reacciones.preparar(float(t), (m.get("author") or {}).get("name"), x)
+            if p:
+                prep.append(p)
+                crudos.append((float(t), x[:200]))
     except Exception as e:
         log(f"    chat no disponible ({type(e).__name__})")
-    if n < 50:
+    if len(prep) < 50:
         return None
-    log(f"    chat leido: {n} mensajes")
-    return s
+    log(f"    chat leido: {len(prep)} mensajes de {len({p[1] for p in prep})} personas")
+    return reacciones.serie(prep, dur), prep, crudos
 
 
 def senal_audio(url, dur, vid):
@@ -284,8 +283,46 @@ def estado_directo(url):
     return None
 
 
-def clips_recientes_twitch(canal, limite=20):
-    """Clips que la gente acaba de crear en Twitch (las ultimas 24 h), del mas visto al menos visto."""
+TWITCH_GQL = "https://gql.twitch.tv/gql"
+TWITCH_WEB_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"     # el client-id publico que usa la web de Twitch
+
+
+def _epoch(iso):
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def _clips_gql(canal, periodo, orden, primero=50, despues=None):
+    import requests
+    cursor = f', after:"{despues}"' if despues else ""
+    q = ('query{user(login:"%s"){clips(first:%d%s,criteria:{period:%s,sort:%s}){edges{cursor node{'
+         'id slug title createdAt viewCount durationSeconds videoOffsetSeconds curator{login} video{id} url}}'
+         'pageInfo{hasNextPage}}}}' % (canal.lower(), primero, cursor, periodo, orden))
+    r = requests.post(TWITCH_GQL, json={"query": q}, timeout=20, headers={"Client-Id": TWITCH_WEB_ID})
+    r.raise_for_status()
+    clips = ((r.json().get("data") or {}).get("user") or {}).get("clips") or {}
+    return clips.get("edges") or [], (clips.get("pageInfo") or {}).get("hasNextPage")
+
+
+def clips_recientes_twitch(canal, limite=30):
+    """Clips que la gente acaba de crear en Twitch, del MAS NUEVO al mas viejo, con quien y cuando lo hizo.
+    Si la consulta directa falla, usa la lista de yt-dlp (sin saber quien lo creo)."""
+    try:
+        edges, _ = _clips_gql(canal, "LAST_DAY", "CREATED_AT_DESC", limite)
+        out = []
+        for e in edges:
+            n = e.get("node") or {}
+            out.append({"url": n.get("url") or f"https://clips.twitch.tv/{n.get('slug')}", "id": n.get("id") or n.get("slug"),
+                        "titulo": n.get("title") or "", "vistas": n.get("viewCount") or 0, "canal": canal,
+                        "ts": _epoch(n.get("createdAt")), "creador": ((n.get("curator") or {}).get("login") or "").lower(),
+                        "dur": n.get("durationSeconds") or 30})
+        if out:
+            return out
+    except Exception:
+        pass
     url = f"https://www.twitch.tv/{canal}/clips?filter=clips&range=24hr"
     with ydl({"extract_flat": "in_playlist", "playlistend": limite, "noplaylist": False}) as y:
         r = y.extract_info(url, download=False)
@@ -297,5 +334,52 @@ def clips_recientes_twitch(canal, limite=20):
         if not u.startswith("http"):
             u = f"https://clips.twitch.tv/{u}"
         out.append({"url": u, "id": e.get("id") or u, "titulo": e.get("title") or "",
-                    "vistas": e.get("view_count") or 0, "canal": canal, "ts": e.get("timestamp")})
+                    "vistas": e.get("view_count") or 0, "canal": canal, "ts": e.get("timestamp"),
+                    "creador": (e.get("uploader_id") or e.get("creator") or "").lower(), "dur": e.get("duration") or 30})
     return out
+
+
+def clips_recientes_kick(canal, limite=30):
+    """Clips nuevos de Kick (del mas nuevo al mas viejo)."""
+    api = f"https://kick.com/api/v2/channels/{canal}/clips?sort=date&time=day"
+    with ydl() as y:
+        data = json.loads(y.urlopen(yt_dlp.networking.Request(api, headers={"Accept": "application/json"})).read())
+    out = []
+    for c in (data.get("clips") or [])[:limite]:
+        out.append({"url": f"https://kick.com/{canal}/clips/{c['id']}", "id": c["id"], "titulo": c.get("title") or "",
+                    "vistas": c.get("views") or c.get("view_count") or 0, "canal": canal, "ts": _epoch(c.get("created_at")),
+                    "creador": ((c.get("creator") or {}).get("username") or "").lower(), "dur": c.get("duration") or 30})
+    return out
+
+
+def senal_clips_vod(inf, dur):
+    """En un VOD de Twitch: donde saco clip la gente. Varias personas clipeando el mismo tramo es la
+    mejor senal de que ahi paso algo. Devuelve (serie, [(segundo, creador)]) o None."""
+    vid = str(inf.get("id") or "").lstrip("v")
+    canal = inf.get("uploader_id") or inf.get("channel") or inf.get("uploader")
+    if not vid or not canal:
+        return None
+    marcas, despues = [], None
+    try:
+        for _ in range(10):                                  # hasta 1000 clips del ultimo mes
+            edges, hay_mas = _clips_gql(canal, "LAST_MONTH", "VIEWS_DESC", 100, despues)
+            for e in edges:
+                n = e.get("node") or {}
+                if str((n.get("video") or {}).get("id")) == vid and n.get("videoOffsetSeconds") is not None:
+                    fin = float(n["videoOffsetSeconds"]) + float(n.get("durationSeconds") or 30)
+                    marcas.append((fin, ((n.get("curator") or {}).get("login") or "?").lower(),
+                                   float(n.get("durationSeconds") or 30)))
+            if not hay_mas or not edges:
+                break
+            despues = edges[-1].get("cursor")
+    except Exception as e:
+        log(f"    clips del VOD no disponibles ({type(e).__name__})")
+    if len(marcas) < 2:
+        return None
+    s = np.zeros(int(dur) + 1)
+    for fin, _, d in marcas:
+        a, b = int(max(0, fin - d)), int(min(dur, fin))
+        s[a:b + 1] += 0.4
+        s[int(max(0, fin - 10)):b + 1] += 1.0             # lo que se clipea es lo de justo antes de cortar
+    log(f"    clips de la comunidad en este VOD: {len(marcas)} de {len({m[1] for m in marcas})} personas")
+    return s, [(fin, c) for fin, c, _ in marcas]
