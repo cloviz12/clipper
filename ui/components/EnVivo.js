@@ -92,6 +92,19 @@ export default function EnVivo({ email }) {
               <input type="range" min="0.5" max="2" step="0.1" defaultValue={f.sensibilidad}
                 onMouseUp={(e) => cambiar(f.id, { sensibilidad: Number(e.target.value) })}
                 onTouchEnd={(e) => cambiar(f.id, { sensibilidad: Number(e.target.value) })} />
+              <label>Momentos por hora que busca (se ajusta al chat de este canal)</label>
+              <input type="number" min="1" max="20" step="1" defaultValue={f.opciones?.clips_por_hora || 4}
+                onBlur={(e) => {
+                  const n = Math.max(1, Math.min(20, Number(e.target.value) || 4));
+                  if (n !== (f.opciones?.clips_por_hora || 4)) cambiar(f.id, { opciones: { ...(f.opciones || {}), clips_por_hora: n } });
+                }} />
+              <div className="suave" style={{ fontSize: 12, marginTop: 6 }}>
+                {f.opciones?.perfil?.umbral
+                  ? <>Aprendido del canal: ~{Math.round(f.opciones.perfil.gente_tipica || 0)} personas comentando cada 10 s
+                    · umbral {Number(f.opciones.perfil.umbral).toFixed(1)}
+                    {f.opciones.perfil.directos ? ` · ${f.opciones.perfil.directos} directo${f.opciones.perfil.directos === 1 ? "" : "s"}` : ""}</>
+                  : "Todavía aprendiendo cómo reacciona este público (se calibra en los primeros 10 min del directo)."}
+              </div>
             </>}
             <label>Redes</label>
             <div className="fila">

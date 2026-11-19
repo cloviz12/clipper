@@ -290,6 +290,48 @@ def estado_directo(url):
 TWITCH_GQL = "https://gql.twitch.tv/gql"
 TWITCH_WEB_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"     # el client-id publico que usa la web de Twitch
 
+# categorias que NO son un videojuego (charla, IRL, musica...): ahi no se fuerza el split
+NO_JUEGO = re.compile(r"^\s*(just chatting|charlando|irl|talk shows( & podcasts)?|podcasts?|music|m[uú]sica|art|arte|"
+                      r"asmr|food & drink|cooking|cocina|travel & outdoors|viajes|pools, hot tubs,? (and|&) beaches|"
+                      r"sports|deportes|fitness( & health)?|special events|eventos especiales|science & technology|"
+                      r"makers & crafting|dj|watch party|software and game development|politics|crypto|slots|"
+                      r"casino|gambling|bienvenida)\s*$", re.I)
+
+
+def categoria_directo(url, inf=None):
+    """Que esta transmitiendo ahora (juego o categoria) en Twitch o Kick. None si no se sabe."""
+    inf = inf or {}
+    for k in ("category", "game"):
+        if inf.get(k):
+            return str(inf[k])
+    if inf.get("categories"):
+        return str(inf["categories"][0])
+    plat, canal = plataforma_de(url), nombre_canal(url)
+    try:
+        import requests
+        if plat == "twitch":
+            q = 'query{user(login:"%s"){stream{game{name}}}}' % canal.lower()
+            r = requests.post(TWITCH_GQL, json={"query": q}, timeout=15, headers={"Client-Id": TWITCH_WEB_ID})
+            st = (((r.json().get("data") or {}).get("user") or {}).get("stream") or {})
+            return ((st.get("game") or {}).get("name")) or None
+        if plat == "kick":
+            with ydl() as y:
+                d = json.loads(y.urlopen(yt_dlp.networking.Request(
+                    f"https://kick.com/api/v2/channels/{canal}", headers={"Accept": "application/json"})).read())
+            cats = ((d.get("livestream") or {}).get("categories") or [])
+            return cats[0].get("name") if cats else None
+    except Exception:
+        return None
+    return None
+
+
+def es_videojuego(categoria):
+    """True si la categoria es un juego; None si no hay categoria (se decide mirando el video)."""
+    if not categoria:
+        return None
+    return not NO_JUEGO.search(str(categoria))
+
+
 
 def _epoch(iso):
     from datetime import datetime

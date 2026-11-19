@@ -9,19 +9,29 @@ import statistics
 import subprocess
 import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 
 import numpy as np
 
 from . import chat as chatmod
 from . import fuentes as F
-from .base import BUFFER, TRABAJO, _sin_ventana, ajustes, log, parse_rango, slug, tool
+from . import viralidad
+from .base import BUFFER, TRABAJO, _sin_ventana, ajustes, log, parse_rango, sb, slug, tool
 
 REACCION_S = 5          # lo que tarda el chat en reaccionar a lo que vio
 GUARDAR_S = 360         # minutos de buffer que se guardan
 ESPERA_INICIAL = 90     # segundos para aprender lo "normal" del directo
 RAFAGA_S = 45           # clips creados con menos de esto entre si son del mismo momento
 RAFAGA_MIN = 2          # personas distintas clipeando lo mismo = momento seguro
+
+# Umbral POR STREAMER: cada audiencia reacciona distinto (un chat colombiano de 15 personas que escribe
+# "jsjsjs" y "uy hp" nunca va a llegar a la fuerza de un chat de 20 mil). En vez de un numero fijo,
+# se aprende la fuerza normal de ESE directo y se corta lo que se sale de lo normal para ese publico.
+UMBRAL_TECHO = 4.0      # el umbral fijo de antes: nunca se pide mas que esto
+UMBRAL_PISO = 1.3       # ni menos (si no, en un directo muerto cualquier ruido seria clip)
+CLIPS_HORA = 4          # cuantos momentos por hora se buscan por defecto (se cambia por canal)
+APRENDER_S = 600        # segundos de historia para confiar solo en lo de este directo
 
 
 class Monitor(threading.Thread):
@@ -45,6 +55,12 @@ class Monitor(threading.Thread):
         self.clips_pend = []       # clips nuevos de la comunidad que aun no usamos
         self.momentos = []         # segundos epoch de los momentos que ya cortamos
         self.cortes = 0
+        self.hist = deque(maxlen=3 * 3600)   # fuerza de cada segundo de este directo
+        self.gente_tip = 0.0       # personas que comentan normalmente en 10 s (tamano de la audiencia)
+        self.info_directo = info_directo
+        self.categoria = None      # juego o categoria actual (se lee al arrancar y cada 5 min)
+        self.perfil = dict((fuente.get("opciones") or {}).get("perfil") or {})
+        self._ult_perfil = time.time()
 
     # ------------------------------------------------------------ grabacion
     def _grabar(self):
@@ -132,7 +148,7 @@ class Monitor(threading.Thread):
 
     # ------------------------------------------------------------ deteccion
     def _puntaje(self, ahora):
-        """Que tanto se sale de lo normal el momento (ahora - reaccion)."""
+        """Que tanto se sale de lo normal el momento (ahora - reaccion), adaptado al tamano del chat."""
         ventana = 8
         serie = self.chat.serie(ahora - 300, ahora)
         if len(serie) < 60 or self.chat.mensajes < 30:
@@ -153,26 +169,107 @@ class Monitor(threading.Thread):
             normal = [self.audio[k] for k in claves if k >= ahora - 180]
             if recientes and normal:
                 z_audio = (max(recientes) - statistics.median(normal)) / 4.0
+        tip = self.gente_tip
+        # en un chat chico "medio chat riendose" son 3 personas; en uno grande, 6 o mas
+        min_gente = max(3, min(6, round(tip * 0.9)))
         fuerza = max(0.0, z_chat) * (0.5 + 1.3 * consenso)
-        if lect.gente >= 6:
+        if lect.gente >= min_gente:
             fuerza += 2.6 * consenso                 # medio chat riendose ya es un momento, aunque sea chico
             if consenso < 0.15:
                 fuerza *= 0.55                       # mucho texto pero sin reaccion: raid, saludos, spam
-        return fuerza + 0.5 * max(0.0, z_audio), z_chat, z_audio
+        # chat chico: que 4 personas reaccionen a la vez cuando normalmente comentan 2 es enorme
+        if tip < 6 and consenso >= 0.3:
+            reaccionan = lect.gente * max(lect.frac_reaccion, lect.frac_tema)
+            fuerza += min(3.0, 0.9 * max(0.0, reaccionan / max(1.0, tip) - 1)) * (6 - tip) / 6
+        # con poco chat, el grito del streamer dice mas que el chat
+        peso_audio = 0.5 + 0.7 * max(0.0, (6 - tip) / 6)
+        return fuerza + peso_audio * max(0.0, z_audio), z_chat, z_audio
+
+    def _umbral(self):
+        """Umbral de ESTE canal: el percentil de la fuerza que deja pasar ~N momentos por hora,
+        entre un piso y el umbral fijo de antes, por la sensibilidad que se elige en la app."""
+        sens = float(self.f.get("sensibilidad") or 1.0)
+        op = self.f.get("opciones") or {}
+        por_hora = float(op.get("clips_por_hora") or ajustes().get("clips_por_hora") or CLIPS_HORA)
+        vals = [v for _, v in self.hist]
+        q = 1 - min(0.06, max(0.002, por_hora * 7 / 3600))      # un momento dura ~7 s por encima
+        propio = float(np.quantile(vals, q)) if len(vals) >= 120 else None
+        guardado = self.perfil.get("umbral")
+        if propio is not None and len(vals) >= APRENDER_S:
+            base = propio
+        elif propio is not None and guardado:
+            m = len(vals) / APRENDER_S                         # pasa de lo guardado a lo de hoy
+            base = m * propio + (1 - m) * float(guardado)
+        elif guardado:
+            base = float(guardado)
+        elif propio is not None:
+            base = propio * (1.5 - 0.5 * len(vals) / APRENDER_S)   # al principio, mas exigente
+        else:
+            base = UMBRAL_TECHO
+        return min(UMBRAL_TECHO, max(UMBRAL_PISO, base)) * sens, propio
+
+    def _guardar_perfil(self, final=False):
+        """Guarda lo aprendido del canal para que el proximo directo arranque ya calibrado."""
+        vals = [v for _, v in self.hist]
+        if len(vals) < APRENDER_S:
+            return
+        _, propio = self._umbral()
+        if propio is None:
+            return
+        viejo = self.perfil.get("umbral")
+        nuevo = propio if not viejo else 0.6 * propio + 0.4 * float(viejo)
+        self.perfil.update({
+            "umbral": round(nuevo, 3), "gente_tipica": round(self.gente_tip, 1),
+            "categoria": self.categoria, "actualizado": datetime.now(timezone.utc).isoformat(),
+            "directos": int(self.perfil.get("directos", 0)) + (1 if final else 0),
+            "fuerza_mediana": round(float(np.median(vals)), 3)})
+        try:
+            fila = sb().table("fuentes").select("opciones").eq("id", self.f["id"]).execute().data
+            op = dict((fila[0].get("opciones") if fila else None) or {})
+            op["perfil"] = self.perfil
+            sb().table("fuentes").update({"opciones": op}).eq("id", self.f["id"]).execute()
+        except Exception as e:
+            log(f"{self.canal}: no pude guardar lo aprendido del canal ({str(e)[:120]})", "aviso")
 
     def _detectar(self):
+        ult_tip, ult_cat = 0, time.time()
         while self.vivo:
             time.sleep(1)
             ahora = time.time()
-            if ahora - self.inicio < ESPERA_INICIAL or ahora - self.ultimo_corte < 75:
+            if ahora - ult_tip > 15:
+                self.gente_tip = self.chat.gente_tipica(ahora - 300, ahora)
+                ult_tip = ahora
+            if ahora - ult_cat > 300:                          # el streamer cambia de juego o se pone a charlar
+                ult_cat = ahora
+                threading.Thread(target=self._refrescar_categoria, daemon=True).start()
+            if ahora - self._ult_perfil > 900:
+                self._ult_perfil = ahora
+                threading.Thread(target=self._guardar_perfil, daemon=True).start()
+            if ahora - self.inicio < ESPERA_INICIAL:
                 continue
             p, zc, za = self._puntaje(ahora)
-            umbral = 4.0 * float(self.f.get("sensibilidad") or 1.0)
+            self.hist.append((ahora, p))
+            if ahora - self.ultimo_corte < 75:
+                continue
+            umbral, _ = self._umbral()
             if p >= umbral and not self._ya_cortado(ahora - REACCION_S):
                 self.ultimo_corte = ahora
                 momento = ahora - REACCION_S
                 self.momentos.append(momento)
                 threading.Thread(target=self._cortar, args=(momento, p, zc, za), daemon=True).start()
+
+    def _refrescar_categoria(self):
+        c = F.categoria_directo(self.f["url"])
+        if c and c != self.categoria:
+            log(f"{self.canal}: ahora esta en «{c}»", "vivo")
+            self.categoria = c
+
+    def _rareza(self, p):
+        """0..1: que tan raro es esta fuerza para este directo (percentil)."""
+        vals = [v for _, v in self.hist]
+        if len(vals) < 60:
+            return min(1.0, p / UMBRAL_TECHO)
+        return float(np.mean(np.array(vals) < p))
 
     def _cortar(self, momento, p, zc, za, extra=None):
         lmin, lmax = parse_rango(self.f.get("opciones", {}).get("duracion") or ajustes().get("duracion_clip"))
@@ -201,13 +298,17 @@ class Monitor(threading.Thread):
         lect = self.chat.lectura(momento - 6, momento + despues)
         extra = extra or {}
         que = "; ".join(x for x in (extra.get("motivo"), lect.describir()) if x)
-        log(f"PICO en {self.canal} (fuerza {p:.1f}: chat {zc:.1f}, audio {za:.1f})"
+        viral = viralidad.senales_vivo(lect, self.chat.gente_entre(momento - 2, momento + 8), self.gente_tip,
+                                       self._rareza(p), za, extra.get("clips", 0))
+        umbral, _ = self._umbral()
+        log(f"PICO en {self.canal} (fuerza {p:.1f} / umbral {umbral:.1f}: chat {zc:.1f}, audio {za:.1f})"
             f"{' — ' + que if que else ''} — editando", "pico")
         self.cola.put((0, time.time(), {
             "archivo": salida, "canal": self.canal, "origen": "en_vivo", "url_fuente": self.url_vivo,
             "titulo_fuente": self.titulo, "pico": antes, "puntaje": min(1.0, p / 10),
             "senales": extra.get("senales", ["chat", "audio"]) + lect.etiquetas(), "reaccion_chat": que,
             "chat": self.chat.textos_entre(momento - 10, momento + despues), "fuente": self.f,
+            "viral": viral, "categoria": self.categoria,
             "detectado_en": datetime.fromtimestamp(momento, timezone.utc).isoformat()}))
 
     # ------------------------------------------------------------ clips que crea la gente (Twitch y Kick)
@@ -239,7 +340,7 @@ class Monitor(threading.Thread):
                 log(f"{self.canal}: {motivo} — corto ese momento", "pico")
                 threading.Thread(target=self._cortar, daemon=True, args=(momento, 6.0 + len(gente), 0.0, 0.0, {
                     "senales": [f"{len(gente)} clips de la comunidad a la vez", "chat", "audio"],
-                    "motivo": motivo})).start()
+                    "motivo": motivo, "clips": len(gente)})).start()
             elif ahora - g[-1]["ts"] > RAFAGA_S + 10:
                 # nadie mas lo clipeo: igual vale, pero se usa el clip tal cual (si no lo cortamos ya)
                 usados |= {c["id"] for c in g}
@@ -260,7 +361,10 @@ class Monitor(threading.Thread):
             "archivo": arch, "canal": self.canal, "origen": f"clip_{self.plat}", "url_fuente": c["url"],
             "titulo_fuente": c["titulo"] or self.titulo, "pico": None, "puntaje": 0.7,
             "senales": ["clip de la comunidad"], "chat": self.chat.textos_entre(c["ts"] - 40, c["ts"] + 10),
-            "fuente": self.f}))
+            "fuente": self.f, "categoria": self.categoria,
+            "viral": viralidad.senales_vivo(self.chat.lectura(c["ts"] - 30, c["ts"]),
+                                            self.chat.gente_entre(c["ts"] - 30, c["ts"] - 20), self.gente_tip,
+                                            0.6, 0.0, 1)}))
 
     def _clips_comunidad(self):
         leer = F.clips_recientes_twitch if self.plat == "twitch" else F.clips_recientes_kick
@@ -284,7 +388,10 @@ class Monitor(threading.Thread):
 
     # ------------------------------------------------------------
     def run(self):
-        log(f"EN VIVO: {self.canal} ({self.plat}) — {self.titulo[:80]}", "vivo")
+        self.categoria = F.categoria_directo(self.f["url"], self.info_directo)
+        aprendido = f", umbral aprendido {self.perfil['umbral']:.1f}" if self.perfil.get("umbral") else ""
+        log(f"EN VIVO: {self.canal} ({self.plat}) — {self.titulo[:80]}"
+            f"{' — ' + self.categoria if self.categoria else ''}{aprendido}", "vivo")
         if self.plat == "twitch":
             chatmod.twitch(self.canal, self.chat)
             threading.Thread(target=self._clips_comunidad, daemon=True).start()
@@ -297,7 +404,10 @@ class Monitor(threading.Thread):
         threading.Thread(target=self._detectar, daemon=True).start()
         self._grabar()
         self.parar()
-        log(f"{self.canal} termino el directo ({self.cortes} momentos cortados)", "vivo")
+        self._guardar_perfil(final=True)
+        umbral, _ = self._umbral()
+        log(f"{self.canal} termino el directo ({self.cortes} momentos cortados; umbral aprendido "
+            f"{umbral:.1f}, audiencia ~{self.gente_tip:.0f} personas comentando cada 10 s)", "vivo")
 
     def parar(self):
         self.vivo = False
