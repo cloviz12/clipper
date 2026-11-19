@@ -38,6 +38,8 @@ Name: "{autodesktop}\CLIPPER"; Filename: "{app}\CLIPPER.exe"; Tasks: escritorio
 
 [Run]
 Filename: "{app}\CLIPPER.exe"; Description: "Abrir CLIPPER"; Flags: nowait postinstall skipifsilent
+; actualizacion automatica (instalacion silenciosa): vuelve a abrir la app en la bandeja
+Filename: "{app}\CLIPPER.exe"; Parameters: "--bandeja"; Flags: nowait; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /F /IM CLIPPER.exe"; Flags: runhidden; RunOnceId: "cerrar"
