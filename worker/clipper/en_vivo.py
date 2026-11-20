@@ -116,6 +116,9 @@ class Monitor(threading.Thread):
             if not self.vivo:
                 return
             motivo_ff = " | ".join(errores) if "errores" in locals() and errores else ""
+            if "ff" in locals():
+                time.sleep(0.5)
+                motivo_ff = (motivo_ff + f" (ffmpeg salio con codigo {ff.poll()})").strip()
             log(f"{self.canal}: streamlink no pudo ({str(e)[:150]}){' — ffmpeg dijo: ' + motivo_ff if motivo_ff else ''}; "
                 f"pruebo directo con yt-dlp", "aviso")
         for p in self.procs:                       # que no quede un ffmpeg viejo escribiendo los mismos pedacitos

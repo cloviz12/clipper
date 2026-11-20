@@ -58,19 +58,20 @@ if _links.exists():
 WORKER = os.environ.get("WORKER_NOMBRE") or socket.gethostname()
 VERSION = "2.0"
 
-_sb = None
-_lock = threading.Lock()
+_local = threading.local()
 
 
 def sb():
-    global _sb
-    if _sb is None:
+    """Un cliente de Supabase por hilo: compartir una sola conexion entre muchos hilos
+    (canales, editor, publicador) la cortaba y salia 'Server disconnected'."""
+    c = getattr(_local, "c", None)
+    if c is None:
         from supabase import create_client
         url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if not url or not key:
             raise SystemExit("Faltan SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en worker/.env")
-        _sb = create_client(url, key)
-    return _sb
+        c = _local.c = create_client(url, key)
+    return c
 
 
 DEFAULTS = {

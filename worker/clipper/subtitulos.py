@@ -4,8 +4,9 @@
 - tarjeta de 'hook' arriba en los primeros segundos y credito @canal"""
 import random
 import re
+import shutil
 
-from .base import log
+from .base import MODELOS, log
 
 _MODEL = {}
 
@@ -26,13 +27,19 @@ ESTILOS = [
 FUERTES = re.compile(r"^(ja(ja)+\w*|no+|s[ií]+|qu[eé]+|wtf|omg|dios|brutal|incre[ií]ble|gol+|mira|nunca|siempre|todo|nada|\d[\d.,%]*)$", re.I)
 
 
-def _borrar_cache_modelo(nombre):
-    """Borra el modelo de Whisper descargado (cache de HuggingFace) para que se baje de nuevo limpio."""
-    import shutil
-    from huggingface_hub import constants
-    carpeta = Path(constants.HF_HUB_CACHE) / f"models--Systran--faster-whisper-{nombre}"
-    shutil.rmtree(carpeta, ignore_errors=True)
-    return carpeta
+def _ruta_modelo(nombre, rehacer=False):
+    """Carpeta propia del modelo (archivos reales, sin la cache con enlaces de HuggingFace, que en Windows
+    a veces deja un model.bin que no se puede abrir). Se baja una vez y se reutiliza."""
+    destino = MODELOS / f"faster-whisper-{nombre}"
+    if rehacer:
+        shutil.rmtree(destino, ignore_errors=True)
+    modelo = destino / "model.bin"
+    if not modelo.exists() or modelo.stat().st_size < 10_000_000:     # falta o quedo a medias
+        from huggingface_hub import snapshot_download
+        log(f"bajando el modelo de subtitulos «{nombre}» (una sola vez, necesita internet)...", "aviso")
+        shutil.rmtree(destino, ignore_errors=True)
+        snapshot_download(f"Systran/faster-whisper-{nombre}", local_dir=str(destino))
+    return str(destino)
 
 
 def _modelo(nombre, dispositivo="auto"):
@@ -45,14 +52,10 @@ def _modelo(nombre, dispositivo="auto"):
             except Exception:
                 pass
         try:
-            _MODEL[nombre] = WhisperModel(nombre, device="cpu", compute_type="int8")
+            _MODEL[nombre] = WhisperModel(_ruta_modelo(nombre), device="cpu", compute_type="int8")
         except Exception as e:
-            if "model.bin" not in str(e):
-                raise
-            # descarga incompleta o archivo danado: se borra y se baja otra vez
-            c = _borrar_cache_modelo(nombre)
-            log(f"whisper {nombre}: el modelo descargado estaba danado, lo bajo de nuevo ({c})", "aviso")
-            _MODEL[nombre] = WhisperModel(nombre, device="cpu", compute_type="int8")
+            log(f"whisper {nombre}: no pude abrir el modelo ({str(e)[:150]}); lo bajo de nuevo", "aviso")
+            _MODEL[nombre] = WhisperModel(_ruta_modelo(nombre, rehacer=True), device="cpu", compute_type="int8")
         log(f"whisper {nombre} cargado en procesador")
     return _MODEL[nombre]
 
