@@ -20,6 +20,14 @@ function nombreDe(url) {
   return m ? m[1] : url;
 }
 
+// Dónde suele estar la cámara del streamer en juegos: [izquierda %, arriba %, ancho %, alto %]
+const CAMARAS = {
+  ai: ["Arriba a la izquierda", [0, 0, 22, 30]],
+  ad: ["Arriba a la derecha", [78, 0, 22, 30]],
+  bi: ["Abajo a la izquierda", [0, 70, 22, 30]],
+  bd: ["Abajo a la derecha", [78, 70, 22, 30]],
+};
+
 export default function EnVivo({ email }) {
   const [fuentes, setFuentes] = useState([]);
   const [nuevo, setNuevo] = useState({ url: "", modo: "en_vivo", publicacion: "revisar" });
@@ -30,6 +38,12 @@ export default function EnVivo({ email }) {
     return () => sb().removeChannel(ch);
   }, []);
   const cambiar = (id, campos) => sb().from("fuentes").update(campos).eq("id", id).then(({ error }) => error && alert(error.message));
+  function guardarCamara(f, pos, cam) {
+    const op = { ...(f.opciones || {}) };
+    if (cam) { op.camara = cam.map((v) => Math.round(v) / 100); op.camara_pos = pos; }
+    else { delete op.camara; delete op.camara_pos; }
+    cambiar(f.id, { opciones: op });
+  }
   async function agregar(e) {
     e.preventDefault();
     const url = nuevo.url.trim();
@@ -87,6 +101,31 @@ export default function EnVivo({ email }) {
               <option value="revisar">Avisarnos para aprobar</option>
               <option value="auto">Automática (si la IA le da el puntaje mínimo)</option>
             </select>
+            <label>Cámara del streamer (en juegos: cámara arriba, juego abajo)</label>
+            <select value={f.opciones?.camara_pos || ""}
+              onChange={(e) => guardarCamara(f, e.target.value, e.target.value ? CAMARAS[e.target.value][1] : null)}>
+              <option value="">Detectarla sola (a veces se equivoca)</option>
+              {Object.entries(CAMARAS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
+            </select>
+            {f.opciones?.camara && <>
+              <div className="fila">
+                {["Izquierda %", "Arriba %", "Ancho %", "Alto %"].map((n, i) => (
+                  <div key={i + "-" + f.opciones.camara.join(",")} style={{ flex: "1 1 70px" }}>
+                    <label>{n}</label>
+                    <input type="number" min="0" max="100" step="1" defaultValue={Math.round(f.opciones.camara[i] * 100)}
+                      onBlur={(e) => {
+                        const cam = f.opciones.camara.map((v) => v * 100);
+                        const nuevoV = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                        if (Math.round(cam[i]) !== nuevoV) { cam[i] = nuevoV; guardarCamara(f, f.opciones.camara_pos, cam); }
+                      }} />
+                  </div>
+                ))}
+              </div>
+              <div className="suave" style={{ fontSize: 12, marginTop: 6 }}>
+                Es el recuadro donde sale la cámara en el directo, como porcentaje del video. Si en un clip la cámara sale
+                cortada o con pedazos de juego, ajusta estos números.
+              </div>
+            </>}
             {f.modo === "en_vivo" && <>
               <label>Sensibilidad: {f.sensibilidad <= 0.7 ? "muchos clips" : f.sensibilidad >= 1.5 ? "solo picos enormes" : "normal"} ({f.sensibilidad})</label>
               <input type="range" min="0.5" max="2" step="0.1" defaultValue={f.sensibilidad}

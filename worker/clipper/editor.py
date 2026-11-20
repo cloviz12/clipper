@@ -70,7 +70,8 @@ def renderizar(src, ctx, carpeta=None):
     palabras = ia.corregir(palabras, tx.get("correcciones"))
 
     # 4. encuadre y efectos
-    plan = encuadre.planear(src, info, aj.get("formato", "auto"), es_videojuego(ctx.get("categoria")))
+    camara = ((ctx.get("fuente") or {}).get("opciones") or {}).get("camara")
+    plan = encuadre.planear(src, info, aj.get("formato", "auto"), es_videojuego(ctx.get("categoria")), camara)
     rnd = random.Random(cid)
     ncam = efectos.INTENSIDAD.get(aj.get("efectos_camara", "medio"), 2)
     nsfx = efectos.INTENSIDAD.get(aj.get("efectos_sonido", "medio"), 2)
