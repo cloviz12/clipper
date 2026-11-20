@@ -167,16 +167,18 @@ def vigilar_directos():
 
 
 def publicador():
-    ultimo_limpio = 0
+    ultimo_limpio, ultima_sync = 0, 0
     while True:
         try:
             hizo = publicar.publicar_siguiente()
             hizo = publicar.publicar_tiktok_programado() or hizo
             if not hizo:
                 time.sleep(5)
-            if time.time() - ultimo_limpio > 3600:
+            if time.time() - ultimo_limpio > 600:
                 ultimo_limpio = time.time()
                 publicar.limpiar()
+            if time.time() - ultima_sync > 3600:
+                ultima_sync = time.time()
                 efectos.sincronizar_libreria()
         except Exception as e:
             log(f"publicador: {str(e)[:300]}", "error")

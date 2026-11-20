@@ -33,6 +33,16 @@ def _picos_audio(path, dur):
     return out
 
 
+LIMITE_BYTES = 40e6     # el almacenamiento gratis de Supabase rechaza archivos de mas de 50 MB (error 413)
+
+
+def tope_bitrate(dur, con_audio=True):
+    """Bitrate maximo del video para que el clip no pase del limite de archivo: 9 Mbps en clips cortos,
+    menos en los largos (un clip de 95 s a 9 Mbps pesaba ~100 MB y fallaba al subirse)."""
+    audio = 160_000 if con_audio else 0
+    return int(max(1_500_000, min(9_000_000, LIMITE_BYTES * 8 / max(dur, 1.0) - audio)))
+
+
 def renderizar(src, ctx, carpeta=None):
     """ctx: canal, origen, url_fuente, titulo_fuente, pico (s dentro del tramo), puntaje, senales, chat,
     fuente (fila de fuentes o None), trabajo_id, plataformas, inicio, detectado_en."""
@@ -113,7 +123,8 @@ def renderizar(src, ctx, carpeta=None):
     cmd += ["-filter_complex", ";".join([vf] + af), "-map", "[v]"]
     if info["audio"]:
         cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "160k", "-ar", "48000"]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-maxrate", "9M", "-bufsize", "18M",
+    tope = tope_bitrate(dur, info["audio"])
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-maxrate", str(tope), "-bufsize", str(2 * tope),
             "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{dur:.2f}", str(salida)]
     run(cmd, cwd=str(TRABAJO))
     mini = TRABAJO / f"{nombre}.jpg"
