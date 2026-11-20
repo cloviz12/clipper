@@ -102,6 +102,17 @@ class Servidor:
         self._admin().table("cuentas").upsert({"plataforma": red, "cuenta": cuenta, "datos": datos,
                                                "conectado": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}).execute()
 
+    def permisos_tiktok(self):
+        """Solo los permisos que se usan. 'borrador' (lo normal) sube a la bandeja de TikTok y solo necesita video.upload;
+        video.publish es para el modo 'directo'. Pedir uno que la app de TikTok no tiene aprobado hace fallar la autorizacion."""
+        modo = "borrador"
+        try:
+            r = self._admin().table("ajustes").select("datos").eq("id", 1).execute()
+            modo = ((r.data[0]["datos"] if r.data else {}) or {}).get("tiktok_modo", "borrador")
+        except Exception:
+            pass
+        return "user.info.basic,video.upload" + (",video.publish" if modo == "directo" else "")
+
     # -------------------------------------------------------------- OAuth
     def iniciar_oauth(self, red):
         c = self.leer_config()
@@ -122,7 +133,7 @@ class Servidor:
             challenge = hashlib.sha256(verifier.encode()).hexdigest()
             url = "https://www.tiktok.com/v2/auth/authorize/?" + urllib.parse.urlencode({
                 "client_key": c["tiktok_client_key"], "redirect_uri": self.redirect(red), "response_type": "code",
-                "scope": "user.info.basic,video.upload,video.publish", "state": state,
+                "scope": self.permisos_tiktok(), "state": state,
                 "code_challenge": challenge, "code_challenge_method": "S256"})
         else:
             raise ValueError("red desconocida")
