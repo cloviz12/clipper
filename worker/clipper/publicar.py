@@ -2,6 +2,7 @@
 Los accesos de cada red se conectan desde el panel (quedan en la tabla 'cuentas', que solo lee el motor)."""
 import math
 import os
+import shutil
 import time
 from datetime import datetime, timezone
 
@@ -172,9 +173,23 @@ SUBIDORES = {"youtube": subir_youtube, "tiktok": subir_tiktok, "instagram": subi
 
 
 def _archivo(clip):
+    """Baja el video del clip a la carpeta de trabajo. Se escribe como .part y se renombra al terminar:
+    si la descarga o la escritura se corta, no queda un archivo a medias que se reutilice despues
+    (las redes lo rechazan: 'Request processing failed')."""
     local = TRABAJO / clip["video_path"].split("/")[-1]
-    if not local.exists():
-        local.write_bytes(sb().storage.from_("clips").download(clip["video_path"]))
+    if local.exists():
+        return local
+    parcial = local.with_name(local.name + ".part")
+    try:
+        parcial.write_bytes(sb().storage.from_("clips").download(clip["video_path"]))
+        parcial.replace(local)
+    except OSError as e:
+        parcial.unlink(missing_ok=True)
+        try:
+            libre = f"{shutil.disk_usage(TRABAJO).free / 1e9:.1f} GB libres"
+        except Exception:
+            libre = "espacio libre desconocido"
+        raise RuntimeError(f"no pude guardar el video en {TRABAJO} ({libre}): {e}") from e
     return local
 
 
