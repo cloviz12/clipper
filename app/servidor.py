@@ -161,7 +161,22 @@ class Servidor:
                                               "open_id": t.get("open_id"), "expira": time.time() + int(t.get("expires_in", 86400))})
         return cuenta
 
-    def instagram(self, ig_token):
+    def instagram(self, ig_token, ig_id=""):
+        """Dos formas de conectar:
+        - solo token: el token de Instagram que genera Meta (inicio de sesion de Instagram)
+        - token + ID de la cuenta: token de usuario del sistema de un portfolio empresarial (sin caducidad)"""
+        ig_token, ig_id = (ig_token or "").strip(), (ig_id or "").strip()
+        if ig_id:
+            if not ig_id.isdigit():
+                raise ValueError("El ID de la cuenta de Instagram son solo numeros")
+            me = requests.get(f"https://graph.facebook.com/v23.0/{ig_id}", timeout=30,
+                              params={"fields": "username", "access_token": ig_token}).json()
+            if "username" not in me:
+                raise ValueError(f"Instagram no aceptó el token o el ID: {me.get('error', {}).get('message', me)}")
+            cuenta = "@" + me["username"]
+            self.guardar_cuenta("instagram", cuenta, {"access_token": ig_token, "ig_user_id": ig_id, "tipo": "portfolio",
+                                                      "renovado": 0})
+            return cuenta
         me = requests.get("https://graph.instagram.com/v21.0/me", timeout=30,
                           params={"fields": "user_id,username", "access_token": ig_token}).json()
         if not me.get("user_id") and not me.get("id"):
@@ -299,7 +314,7 @@ class Servidor:
                     if ruta == "/api/instagram":
                         if not srv.miembro(datos.get("token")):
                             return self._json(403, {"error": "Tu sesión no es de un miembro del equipo"})
-                        return self._json(200, {"cuenta": srv.instagram(datos.get("ig_token", ""))})
+                        return self._json(200, {"cuenta": srv.instagram(datos.get("ig_token", ""), datos.get("ig_id", ""))})
                 except Exception as e:
                     return self._json(400, {"error": str(e)[:500]})
                 return self._json(404, {"error": "no existe"})
