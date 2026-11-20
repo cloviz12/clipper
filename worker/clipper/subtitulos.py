@@ -26,6 +26,15 @@ ESTILOS = [
 FUERTES = re.compile(r"^(ja(ja)+\w*|no+|s[ií]+|qu[eé]+|wtf|omg|dios|brutal|incre[ií]ble|gol+|mira|nunca|siempre|todo|nada|\d[\d.,%]*)$", re.I)
 
 
+def _borrar_cache_modelo(nombre):
+    """Borra el modelo de Whisper descargado (cache de HuggingFace) para que se baje de nuevo limpio."""
+    import shutil
+    from huggingface_hub import constants
+    carpeta = Path(constants.HF_HUB_CACHE) / f"models--Systran--faster-whisper-{nombre}"
+    shutil.rmtree(carpeta, ignore_errors=True)
+    return carpeta
+
+
 def _modelo(nombre, dispositivo="auto"):
     if nombre not in _MODEL:
         from faster_whisper import WhisperModel
@@ -35,7 +44,15 @@ def _modelo(nombre, dispositivo="auto"):
                 return _MODEL[nombre]
             except Exception:
                 pass
-        _MODEL[nombre] = WhisperModel(nombre, device="cpu", compute_type="int8")
+        try:
+            _MODEL[nombre] = WhisperModel(nombre, device="cpu", compute_type="int8")
+        except Exception as e:
+            if "model.bin" not in str(e):
+                raise
+            # descarga incompleta o archivo danado: se borra y se baja otra vez
+            c = _borrar_cache_modelo(nombre)
+            log(f"whisper {nombre}: el modelo descargado estaba danado, lo bajo de nuevo ({c})", "aviso")
+            _MODEL[nombre] = WhisperModel(nombre, device="cpu", compute_type="int8")
         log(f"whisper {nombre} cargado en procesador")
     return _MODEL[nombre]
 
