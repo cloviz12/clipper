@@ -60,6 +60,14 @@ function Viralidad({ c }) {
 
 function Tarjeta({ c, email }) {
   const [mini, setMini] = useState(null);
+  const [copiado, setCopiado] = useState(false);
+  // la subida de borradores de TikTok no acepta titulo ni hashtags: se copian aqui para pegarlos al terminar el borrador en la app
+  const copiarTikTok = async () => {
+    try {
+      await navigator.clipboard.writeText(c.textos?.tiktok?.caption || "");
+      setCopiado(true); setTimeout(() => setCopiado(false), 1500);
+    } catch { alert("No se pudo copiar. Abre «Editar textos» y copia el caption de TikTok."); }
+  };
   const [video, setVideo] = useState(null);
   const [editar, setEditar] = useState(false);
   const [t, setT] = useState(c.textos || {});
@@ -146,6 +154,7 @@ function Tarjeta({ c, email }) {
                 onClick={() => cambiar({ estado: "programado", publicar_en: new Date(cuando).toISOString(), aprobado_por: email })}>Programar</button>
             </>
           )}
+          {c.textos?.tiktok?.caption && <button className="btn" onClick={copiarTikTok}>{copiado ? "¡Copiado!" : "Copiar texto TikTok"}</button>}
           {editar ? <button className="btn" onClick={guardar}>Guardar textos</button>
             : <button className="btn" onClick={() => setEditar(true)}>Editar textos</button>}
           {c.video_path && <button className="btn" onClick={bajar}>Descargar</button>}
