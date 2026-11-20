@@ -116,7 +116,7 @@ def renderizar(src, ctx, carpeta=None):
     run(cmd, cwd=str(TRABAJO))
     mini = TRABAJO / f"{nombre}.jpg"
     run([tool("ffmpeg"), "-y", "-v", "error", "-ss", f"{max(0.5, (pico or dur / 2))}", "-i", str(salida),
-         "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "4", str(mini)])
+         "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "4", "-strict", "unofficial", str(mini)])
 
     # 6. guardar y avisar al panel
     dia = datetime.now().strftime("%Y-%m-%d")
@@ -155,7 +155,13 @@ def renderizar(src, ctx, carpeta=None):
         "detectado_en": ctx.get("detectado_en") or datetime.now(timezone.utc).isoformat(),
         "aprobado_por": f"auto ({WORKER})" if auto else None,
     }
-    sb().table("clips").insert(fila).execute()
+    try:
+        sb().table("clips").insert(fila).execute()
+    except Exception as e:
+        if "clips_fuente_id_fkey" not in str(e):
+            raise
+        fila["fuente_id"] = None      # el canal se quito del panel mientras el clip se editaba: no se pierde el clip
+        sb().table("clips").insert(fila).execute()
     for p in (ass, mini):
         p.unlink(missing_ok=True)
     if carpeta is None:
