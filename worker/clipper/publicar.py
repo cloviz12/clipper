@@ -143,26 +143,65 @@ def subir_instagram(video, clip, aj):
             d.update(access_token=r["access_token"], renovado=time.time())
             _guardar("instagram", d)
             tok = d["access_token"]
-    caption = clip["textos"].get("instagram", {}).get("caption") or clip.get("titulo") or ""
-    r = requests.post(f"{host}/{ver}/{uid}/media", timeout=60, data={
-        "media_type": "REELS", "upload_type": "resumable", "caption": caption[:2200], "share_to_feed": "true",
-        "access_token": tok}).json()
+    caption = (clip["textos"].get("instagram", {}).get("caption") or clip.get("titulo") or "")[:2200]
+    errores = []
+    for modo in ("url", "subida"):
+        try:
+            cid = _ig_contenedor(modo, host, ver, uid, tok, caption, video, clip)
+            if cid is None:
+                continue
+            return _ig_publicar(host, ver, uid, tok, cid)
+        except Exception as e:
+            errores.append(f"{modo}: {str(e)[:250]}")
+            log(f"instagram ({modo}) fallo, {'pruebo otra forma' if modo == 'url' else 'sin mas intentos'}: {str(e)[:200]}", "aviso")
+    raise RuntimeError("Instagram no publico. " + " | ".join(errores))
+
+
+def _url_firmada(clip):
+    """URL temporal del video en el almacenamiento, para que Meta lo descargue."""
+    path = clip.get("video_path")
+    if not path:
+        return None
+    r = sb().storage.from_("clips").create_signed_url(path, 3600)
+    u = r.get("signedURL") or r.get("signedUrl")
+    if u and u.startswith("/"):
+        u = os.environ["SUPABASE_URL"].rstrip("/") + "/storage/v1" + u
+    return u
+
+
+def _ig_contenedor(modo, host, ver, uid, tok, caption, video, clip):
+    """Crea el contenedor del Reel. modo 'url': Meta baja el video de una URL temporal (lo habitual).
+    modo 'subida': se sube el archivo directo. Devuelve el id del contenedor ya procesado, o None si no aplica."""
+    datos = {"media_type": "REELS", "caption": caption, "share_to_feed": "true", "access_token": tok}
+    if modo == "url":
+        url = _url_firmada(clip)
+        if not url:
+            return None
+        datos["video_url"] = url
+    else:
+        datos["upload_type"] = "resumable"
+    r = requests.post(f"{host}/{ver}/{uid}/media", timeout=60, data=datos).json()
     if "id" not in r:
-        raise RuntimeError(f"Instagram: {r}")
+        raise RuntimeError(f"no se creo el contenedor: {r}")
     cid = r["id"]
-    up = r.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{ver}/{cid}"
-    with open(video, "rb") as f:
-        rr = requests.post(up, data=f, timeout=900, headers={"Authorization": f"OAuth {tok}", "offset": "0",
-                                                             "file_size": str(video.stat().st_size)})
-    if rr.status_code != 200:
-        raise RuntimeError(f"Instagram rechazo el archivo ({rr.status_code}): {rr.text[:200]}")
+    if modo == "subida":
+        up = r.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{ver}/{cid}"
+        with open(video, "rb") as f:
+            rr = requests.post(up, data=f, timeout=900, headers={"Authorization": f"OAuth {tok}", "offset": "0",
+                                                                 "file_size": str(video.stat().st_size)})
+        if rr.status_code != 200:
+            raise RuntimeError(f"Instagram rechazo el archivo ({rr.status_code}): {rr.text[:200]}")
     for _ in range(60):
         time.sleep(6)
         s = requests.get(f"{host}/{ver}/{cid}", params={"fields": "status_code,status", "access_token": tok}, timeout=30).json()
         if s.get("status_code") == "FINISHED":
-            break
+            return cid
         if s.get("status_code") == "ERROR":
             raise RuntimeError(f"Instagram no proceso el video: {s.get('status')}")
+    raise RuntimeError("Instagram tardo demasiado en procesar el video")
+
+
+def _ig_publicar(host, ver, uid, tok, cid):
     p = requests.post(f"{host}/{ver}/{uid}/media_publish", data={"creation_id": cid, "access_token": tok}, timeout=60).json()
     if "id" not in p:
         raise RuntimeError(f"Instagram no publico: {p}")
