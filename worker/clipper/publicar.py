@@ -132,8 +132,11 @@ def subir_instagram(video, clip, aj):
     c = _cuenta("instagram")
     d = c["datos"]
     tok, uid = d["access_token"], d["ig_user_id"]
-    host, ver = "https://graph.instagram.com", "v21.0"
-    if time.time() - d.get("renovado", 0) > 7 * 86400:
+    if d.get("tipo") == "portfolio":      # token de usuario del sistema: otro servidor y no caduca
+        host, ver = "https://graph.facebook.com", "v23.0"
+    else:
+        host, ver = "https://graph.instagram.com", "v21.0"
+    if d.get("tipo") != "portfolio" and time.time() - d.get("renovado", 0) > 7 * 86400:
         r = requests.get(f"{host}/refresh_access_token", params={"grant_type": "ig_refresh_token", "access_token": tok}, timeout=30).json()
         if "access_token" in r:
             d.update(access_token=r["access_token"], renovado=time.time())
