@@ -5,6 +5,7 @@
   (lo de antes + la reaccion) y lo manda a editar al instante
 - en Twitch y Kick vigila los clips que crea la gente: si varias personas clipean lo mismo a la vez,
   corta ese momento de la grabacion propia (mejor calidad y con la reaccion completa)"""
+import shutil
 import statistics
 import subprocess
 import threading
@@ -34,6 +35,23 @@ CLIPS_HORA = 4          # cuantos momentos por hora se buscan por defecto (se ca
 APRENDER_S = 600        # segundos de historia para confiar solo en lo de este directo
 PERFIL_MIN_S = 300      # con esta historia ya se guarda lo aprendido (si la app se cierra, no se pierde)
 PERFIL_CADA_S = 300     # cada cuanto se guarda lo aprendido
+
+COLA_MAX = 8            # si ya hay tantos clips esperando edicion, los picos nuevos se saltan (la edicion es lo lento)
+LIBRE_MIN_GB = 3        # con menos espacio libre en disco no se corta nada (cada recorte pesa cientos de MB)
+
+
+def sin_lugar(cola):
+    """Motivo por el que no conviene cortar ahora (cola llena o disco casi lleno), o None si hay lugar."""
+    if cola.qsize() >= COLA_MAX:
+        return f"hay {cola.qsize()} clips esperando edicion"
+    try:
+        libre = shutil.disk_usage(TRABAJO).free / 1e9
+    except Exception:
+        return None
+    if libre < LIBRE_MIN_GB:
+        return f"quedan solo {libre:.1f} GB libres en el disco"
+    return None
+
 
 # Varios canales pueden pedir corte a la vez: se recorta de a 2 para no saturar el PC (ffmpeg x264)
 _CORTES = threading.Semaphore(2)
@@ -316,7 +334,15 @@ class Monitor(threading.Thread):
             return min(1.0, p / UMBRAL_TECHO)
         return float(np.mean(np.array(vals) < p))
 
+    def _aviso_sin_lugar(self, motivo):
+        if time.time() - getattr(self, "_ult_sin_lugar", 0) > 120:
+            self._ult_sin_lugar = time.time()
+            log(f"{self.canal}: salto este pico porque {motivo}", "aviso")
+
     def _cortar(self, momento, p, zc, za, extra=None):
+        motivo = sin_lugar(self.cola)
+        if motivo:
+            return self._aviso_sin_lugar(motivo)
         lmin, lmax = parse_rango(self.f.get("opciones", {}).get("duracion") or ajustes().get("duracion_clip"))
         L = (lmin + lmax) / 2
         antes, despues = L * 0.7, L * 0.3
@@ -397,6 +423,9 @@ class Monitor(threading.Thread):
         self.clips_pend = [c for c in self.clips_pend if c["id"] not in usados and ahora - c["ts"] < GUARDAR_S]
 
     def _usar_clip(self, c):
+        motivo = sin_lugar(self.cola)
+        if motivo:
+            return self._aviso_sin_lugar(motivo)
         try:
             from .render_tramo import bajar
             arch = bajar(c["url"], nombre=f"clip_{slug(str(c['id']), 30)}")
