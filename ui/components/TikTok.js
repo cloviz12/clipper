@@ -134,8 +134,17 @@ export default function TikTok({ sesion }) {
             <div>Se publicará en <b>{creador.creator_nickname}</b>{creador.creator_username ? <span className="suave"> @{creador.creator_username}</span> : null}</div>
           </div>
         ) : (
-          <p className="suave">{errorCreador || "Consultando la cuenta de TikTok..."}{" "}
-            {errorCreador && <button className="btn chico" onClick={pedirCreador}>Reintentar</button>}</p>
+          <>
+            <p className="suave">{errorCreador || "Consultando la cuenta de TikTok..."}{" "}
+              {errorCreador && <button className="btn chico" onClick={pedirCreador}>Reintentar</button>}</p>
+            {/scope/i.test(errorCreador) && (
+              <p className="suave" style={{ fontSize: 12 }}>
+                Esta pestaña es solo para el modo «directo» de TikTok, que necesita el permiso de publicar (video.publish).
+                En el modo «borrador» no se usa: los clips llegan como borrador a la bandeja de la app de TikTok
+                y se envían desde Clips → Publicar ya. Si tu cuenta está conectada, este aviso es normal.
+              </p>
+            )}
+          </>
         )}
 
         <label>Quién puede ver estos videos *</label>
