@@ -35,6 +35,11 @@ if not CONGELADO:
 if CONGELADO or sys.stdout is None:
     _log = open(CARPETA / "clipper.log", "a", encoding="utf-8", buffering=1)
     sys.stdout = sys.stderr = _log
+    try:
+        import faulthandler   # si la app se cae por un error nativo (Whisper, OpenCV, ffmpeg), queda escrito en clipper.log
+        faulthandler.enable(file=_log, all_threads=True)
+    except Exception:
+        pass
 
 
 def leer_config():

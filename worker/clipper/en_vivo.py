@@ -32,6 +32,11 @@ UMBRAL_TECHO = 4.0      # el umbral fijo de antes: nunca se pide mas que esto
 UMBRAL_PISO = 1.3       # ni menos (si no, en un directo muerto cualquier ruido seria clip)
 CLIPS_HORA = 4          # cuantos momentos por hora se buscan por defecto (se cambia por canal)
 APRENDER_S = 600        # segundos de historia para confiar solo en lo de este directo
+PERFIL_MIN_S = 300      # con esta historia ya se guarda lo aprendido (si la app se cierra, no se pierde)
+PERFIL_CADA_S = 300     # cada cuanto se guarda lo aprendido
+
+# Varios canales pueden pedir corte a la vez: se recorta de a 2 para no saturar el PC (ffmpeg x264)
+_CORTES = threading.Semaphore(2)
 
 
 class Monitor(threading.Thread):
@@ -93,12 +98,20 @@ class Monitor(threading.Thread):
                     ff.stdin.close()
                 except Exception:
                     pass
-                ff.wait(timeout=20)
+                try:
+                    ff.wait(timeout=20)
+                except Exception:
+                    ff.kill()
             return
         except Exception as e:
             if not self.vivo:
                 return
             log(f"{self.canal}: streamlink no pudo ({str(e)[:150]}); pruebo directo con yt-dlp", "aviso")
+        for p in self.procs:                       # que no quede un ffmpeg viejo escribiendo los mismos pedacitos
+            try:
+                p.kill()
+            except Exception:
+                pass
         try:
             with F.ydl({"format": "best[height<=1080]/best"}) as y:
                 url = y.extract_info(self.url_vivo, download=False)["url"]
@@ -122,28 +135,34 @@ class Monitor(threading.Thread):
     def _medir_audio(self):
         medidos = set()
         while self.vivo:
-            segs = self._segmentos()
-            for t, p in segs[:-1]:            # el ultimo se esta escribiendo
-                if p in medidos:
-                    continue
-                medidos.add(p)
-                try:
-                    r = subprocess.run([tool("ffmpeg"), "-v", "error", "-i", str(p), "-vn", "-ac", "1", "-ar", "8000",
-                                        "-f", "s16le", "-"], capture_output=True, timeout=30)
-                    x = np.frombuffer(r.stdout, np.int16).astype(np.float32) / 32768
-                    for i in range(len(x) // 8000):
-                        b = x[i * 8000:(i + 1) * 8000]
-                        self.audio[int(t) + i] = float(20 * np.log10(np.sqrt(np.mean(b * b)) + 1e-6))
-                except Exception:
-                    pass
-            # limpieza del buffer
-            limite = time.time() - GUARDAR_S
-            for t, p in segs:
-                if t < limite:
-                    p.unlink(missing_ok=True)
-                    medidos.discard(p)
-            for k in [k for k in self.audio if k < limite]:
-                del self.audio[k]
+            try:
+                segs = self._segmentos()
+                for t, p in segs[:-1]:            # el ultimo se esta escribiendo
+                    if p in medidos:
+                        continue
+                    medidos.add(p)
+                    try:
+                        r = subprocess.run([tool("ffmpeg"), "-v", "error", "-i", str(p), "-vn", "-ac", "1", "-ar", "8000",
+                                            "-f", "s16le", "-"], capture_output=True, timeout=30)
+                        x = np.frombuffer(r.stdout, np.int16).astype(np.float32) / 32768
+                        for i in range(len(x) // 8000):
+                            b = x[i * 8000:(i + 1) * 8000]
+                            self.audio[int(t) + i] = float(20 * np.log10(np.sqrt(np.mean(b * b)) + 1e-6))
+                    except Exception:
+                        pass
+                # limpieza del buffer (en Windows borrar un archivo en uso falla: no debe matar el hilo)
+                limite = time.time() - GUARDAR_S
+                for t, p in segs:
+                    if t < limite:
+                        try:
+                            p.unlink(missing_ok=True)
+                        except OSError:
+                            continue
+                        medidos.discard(p)
+                for k in [k for k in list(self.audio) if k < limite]:
+                    self.audio.pop(k, None)
+            except Exception as e:
+                log(f"{self.canal}: error midiendo el audio, sigo ({str(e)[:150]})", "aviso")
             time.sleep(1.5)
 
     # ------------------------------------------------------------ deteccion
@@ -211,7 +230,7 @@ class Monitor(threading.Thread):
     def _guardar_perfil(self, final=False):
         """Guarda lo aprendido del canal para que el proximo directo arranque ya calibrado."""
         vals = [v for _, v in self.hist]
-        if len(vals) < APRENDER_S:
+        if len(vals) < PERFIL_MIN_S:
             return
         _, propio = self._umbral()
         if propio is None:
@@ -232,31 +251,43 @@ class Monitor(threading.Thread):
             log(f"{self.canal}: no pude guardar lo aprendido del canal ({str(e)[:120]})", "aviso")
 
     def _detectar(self):
-        ult_tip, ult_cat = 0, time.time()
+        ult_tip, ult_cat, ult_err = 0, time.time(), 0
         while self.vivo:
             time.sleep(1)
-            ahora = time.time()
-            if ahora - ult_tip > 15:
-                self.gente_tip = self.chat.gente_tipica(ahora - 300, ahora)
-                ult_tip = ahora
-            if ahora - ult_cat > 300:                          # el streamer cambia de juego o se pone a charlar
-                ult_cat = ahora
-                threading.Thread(target=self._refrescar_categoria, daemon=True).start()
-            if ahora - self._ult_perfil > 900:
-                self._ult_perfil = ahora
-                threading.Thread(target=self._guardar_perfil, daemon=True).start()
-            if ahora - self.inicio < ESPERA_INICIAL:
-                continue
-            p, zc, za = self._puntaje(ahora)
-            self.hist.append((ahora, p))
-            if ahora - self.ultimo_corte < 75:
-                continue
-            umbral, _ = self._umbral()
-            if p >= umbral and not self._ya_cortado(ahora - REACCION_S):
-                self.ultimo_corte = ahora
-                momento = ahora - REACCION_S
-                self.momentos.append(momento)
-                threading.Thread(target=self._cortar, args=(momento, p, zc, za), daemon=True).start()
+            try:
+                self._paso_deteccion(ult_tip, ult_cat)
+            except Exception as e:
+                # un error aqui antes mataba el hilo en silencio: el canal seguia "en vivo" pero nunca clipeaba
+                if time.time() - ult_err > 60:
+                    ult_err = time.time()
+                    log(f"{self.canal}: error detectando, sigo ({type(e).__name__}: {str(e)[:150]})", "aviso")
+            else:
+                ult_tip, ult_cat = self._tip_t, self._cat_t
+
+    def _paso_deteccion(self, ult_tip, ult_cat):
+        self._tip_t, self._cat_t = ult_tip, ult_cat
+        ahora = time.time()
+        if ahora - ult_tip > 15:
+            self.gente_tip = self.chat.gente_tipica(ahora - 300, ahora)
+            self._tip_t = ahora
+        if ahora - ult_cat > 300:                          # el streamer cambia de juego o se pone a charlar
+            self._cat_t = ahora
+            threading.Thread(target=self._refrescar_categoria, daemon=True).start()
+        if ahora - self._ult_perfil > PERFIL_CADA_S:
+            self._ult_perfil = ahora
+            threading.Thread(target=self._guardar_perfil, daemon=True).start()
+        if ahora - self.inicio < ESPERA_INICIAL:
+            return
+        p, zc, za = self._puntaje(ahora)
+        self.hist.append((ahora, p))
+        if ahora - self.ultimo_corte < 75:
+            return
+        umbral, _ = self._umbral()
+        if p >= umbral and not self._ya_cortado(ahora - REACCION_S):
+            self.ultimo_corte = ahora
+            momento = ahora - REACCION_S
+            self.momentos.append(momento)
+            threading.Thread(target=self._cortar, args=(momento, p, zc, za), daemon=True).start()
 
     def _refrescar_categoria(self):
         c = F.categoria_directo(self.f["url"])
@@ -286,11 +317,13 @@ class Monitor(threading.Thread):
         salida = TRABAJO / f"vivo_{slug(self.canal, 16)}_{int(momento)}.mp4"
         off = max(0.0, a - segs[0][0])
         try:
-            subprocess.run([tool("ffmpeg"), "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lista),
-                            "-ss", f"{off:.2f}", "-t", f"{antes + despues:.2f}", "-c:v", "libx264", "-preset", "ultrafast",
-                            "-crf", "17", "-c:a", "aac", "-b:a", "192k", str(salida)], check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            log(f"{self.canal}: no pude cortar el momento ({e.stderr[-300:]!r})", "error")
+            with _CORTES:
+                subprocess.run([tool("ffmpeg"), "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lista),
+                                "-ss", f"{off:.2f}", "-t", f"{antes + despues:.2f}", "-c:v", "libx264", "-preset", "ultrafast",
+                                "-threads", "2", "-crf", "17", "-c:a", "aac", "-b:a", "192k", str(salida)],
+                               check=True, capture_output=True, timeout=300)
+        except Exception as e:
+            log(f"{self.canal}: no pude cortar el momento ({str(getattr(e, 'stderr', None) or e)[-300:]!r})", "error")
             return
         finally:
             lista.unlink(missing_ok=True)
