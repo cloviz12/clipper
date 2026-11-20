@@ -48,7 +48,8 @@ def renderizar(src, ctx, carpeta=None):
     palabras, frases = ([], [])
     if info["audio"]:
         pista = f"{ctx.get('canal', '')}. {ctx.get('titulo_fuente', '')}"[:200]
-        palabras, frases = subtitulos.transcribir(src, aj, ctx.get("idioma"), pista)
+        idioma = ctx.get("idioma") or ((ctx.get("fuente") or {}).get("opciones") or {}).get("idioma")
+        palabras, frases = subtitulos.transcribir(src, aj, idioma, pista)
 
     # 2. arrancar sin relleno: si nadie habla al inicio, se recorta (salvo que el pico este ahi)
     corte = 0.0

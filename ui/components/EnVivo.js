@@ -101,6 +101,17 @@ export default function EnVivo({ email }) {
               <option value="revisar">Avisarnos para aprobar</option>
               <option value="auto">Automática (si la IA le da el puntaje mínimo)</option>
             </select>
+            <label>Idioma de los subtítulos de este canal</label>
+            <select value={f.opciones?.idioma || ""} onChange={(e) => {
+              const op = { ...(f.opciones || {}) };
+              if (e.target.value) op.idioma = e.target.value; else delete op.idioma;
+              cambiar(f.id, { opciones: op });
+            }}>
+              <option value="">El de Ajustes</option>
+              <option value="es">Español</option>
+              <option value="en">Inglés</option>
+              <option value="pt">Portugués</option>
+            </select>
             <label>Cámara del streamer (en juegos: cámara arriba, juego abajo)</label>
             <select value={f.opciones?.camara_pos || ""}
               onChange={(e) => guardarCamara(f, e.target.value, e.target.value ? CAMARAS[e.target.value][1] : null)}>

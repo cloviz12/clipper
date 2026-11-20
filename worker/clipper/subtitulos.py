@@ -60,13 +60,24 @@ def _modelo(nombre, dispositivo="auto"):
     return _MODEL[nombre]
 
 
+IDIOMAS_APP = {"es", "en", "pt"}      # los que ofrece Ajustes
+IDIOMA_BASE = "es"
+
+
 def transcribir(path, aj, idioma=None, pista=None):
-    lang = idioma or aj.get("idioma") or None
-    if lang in ("auto", ""):
-        lang = None
-    segs, _ = _modelo(aj.get("whisper_modelo", "small"), aj.get("whisper_dispositivo", "auto")).transcribe(
-        str(path), language=lang, word_timestamps=True, vad_filter=True, beam_size=5,
-        condition_on_previous_text=False, initial_prompt=pista)
+    lang = idioma or aj.get("idioma") or IDIOMA_BASE
+    auto = lang == "auto"
+    modelo = _modelo(aj.get("whisper_modelo", "small"), aj.get("whisper_dispositivo", "auto"))
+
+    def correr(l):
+        return modelo.transcribe(str(path), language=l, word_timestamps=True, vad_filter=True, beam_size=5,
+                                 condition_on_previous_text=False, initial_prompt=pista)
+    segs, info = correr(None if auto else lang)
+    if auto and (info.language not in IDIOMAS_APP or info.language_probability < 0.75):
+        # la deteccion automatica se confunde con musica, ruido y dialogos del juego (sale italiano, gales...):
+        # si no esta segura o sale un idioma raro, se usa el de siempre
+        log(f"subtitulos: deteccion automatica dudosa ({info.language} {info.language_probability:.0%}); uso {IDIOMA_BASE}", "aviso")
+        segs, info = correr(IDIOMA_BASE)
     palabras, frases = [], []
     for s in segs:
         frases.append({"t": float(s.start), "texto": s.text.strip()})
