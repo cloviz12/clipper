@@ -171,6 +171,22 @@ export default function Clips({ email }) {
   const [filtro, setFiltro] = useState("revisar");
   const [clips, setClips] = useState([]);
   const [orden, setOrden] = useState("nuevos");
+  const [ocupado, setOcupado] = useState(false);
+  // los clips sin revisar nunca se borran solos y llenan el almacenamiento (plan gratis: 1 GB):
+  // aqui se descartan de golpe (conservando, si se quiere, los mas virales); su video se borra de la nube enseguida
+  async function limpiarLista(conservar) {
+    const estados = FILTROS.find((f) => f[0] === filtro)[2];
+    const { data } = await sb().from("clips").select("id,ia").in("estado", estados).limit(5000);
+    const borrar = (data || []).sort((a, b) => (viralDe(b) ?? -1) - (viralDe(a) ?? -1)).slice(conservar).map((c) => c.id);
+    if (!borrar.length) return alert("No hay nada que descartar.");
+    if (!confirm(`Se descartarán ${borrar.length} clips${conservar ? ` y te quedas con los ${conservar} más virales` : ""}. No se puede deshacer. ¿Seguir?`)) return;
+    setOcupado(true);
+    for (let i = 0; i < borrar.length; i += 100) {
+      const { error } = await sb().from("clips").update({ estado: "descartado" }).in("id", borrar.slice(i, i + 100));
+      if (error) { alert(error.message); break; }
+    }
+    setOcupado(false);
+  }
   useEffect(() => {
     const estados = FILTROS.find((f) => f[0] === filtro)[2];
     const cargar = () => sb().from("clips").select("*").in("estado", estados).order("creado", { ascending: false }).limit(60)
@@ -191,6 +207,13 @@ export default function Clips({ email }) {
           <option value="virales">Más virales primero</option>
         </select>
       </div>
+      {["revisar", "error"].includes(filtro) && clips.length > 0 && (
+        <div className="fila" style={{ marginBottom: 12 }}>
+          <button className="btn chico" disabled={ocupado} onClick={() => limpiarLista(20)}>Quedarme con los 20 más virales</button>
+          <button className="btn chico peligro" disabled={ocupado} onClick={() => limpiarLista(0)}>Descartar todos</button>
+          {ocupado && <span className="suave">Descartando...</span>}
+        </div>
+      )}
       {clips.length === 0 ? (
         <div className="vacio">
           {filtro === "revisar" ? "Nada por revisar. Cuando un canal en vivo tenga un pico, el clip aparece aquí con un sonido." : "No hay clips aquí."}

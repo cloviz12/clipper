@@ -310,16 +310,30 @@ def publicar_tiktok_programado():
     return True
 
 
+def _borrar_videos(clips):
+    """Quita de la nube el video y la miniatura de estos clips y limpia las rutas."""
+    rutas = [r for c in clips for r in (c.get("video_path"), c.get("miniatura_path")) if r]
+    if rutas:
+        sb().storage.from_("clips").remove(rutas)
+    for c in clips:
+        sb().table("clips").update({"video_path": None, "miniatura_path": None}).eq("id", c["id"]).execute()
+
+
 def limpiar():
-    """Borra de la nube los videos ya publicados/descartados despues de unos dias (el plan gratis tiene 1 GB)."""
+    """Libera espacio en la nube (el plan gratis tiene 1 GB):
+    - descartados: se borra el video apenas se descartan
+    - publicados: se borra a los N dias (Ajustes), salvo los que siguen esperando TikTok"""
+    for _ in range(10):                      # por tandas, hasta vaciar los descartados
+        r = sb().table("clips").select("id,video_path,miniatura_path").eq("estado", "descartado") \
+            .not_.is_("video_path", "null").limit(100).execute()
+        if not r.data:
+            break
+        _borrar_videos(r.data)
     dias = int(ajustes().get("dias_guardar_videos", 3))
     limite = datetime.fromtimestamp(time.time() - dias * 86400, timezone.utc).isoformat()
-    r = sb().table("clips").select("id,video_path,estado,tiktok").in_("estado", ["publicado", "descartado"]) \
+    r = sb().table("clips").select("id,video_path,miniatura_path,tiktok").eq("estado", "publicado") \
         .lt("creado", limite).not_.is_("video_path", "null").limit(100).execute()
-    # los que siguen esperando TikTok no se borran (salvo que se hayan descartado)
-    viejos = [c for c in r.data or [] if c["estado"] == "descartado"
-              or (c.get("tiktok") or {}).get("estado") not in ("esperando", "programado", "publicando")]
+    viejos = [c for c in r.data or []
+              if (c.get("tiktok") or {}).get("estado") not in ("esperando", "programado", "publicando")]
     if viejos:
-        sb().storage.from_("clips").remove([c["video_path"] for c in viejos])
-        for c in viejos:
-            sb().table("clips").update({"video_path": None}).eq("id", c["id"]).execute()
+        _borrar_videos(viejos)
