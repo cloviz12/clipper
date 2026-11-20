@@ -15,7 +15,8 @@ export default function Registro() {
       {ev.length === 0 && <div className="suave">Sin actividad todavía.</div>}
       {ev.map((e) => (
         <div key={e.id} className={e.nivel}>
-          <span className="suave">{new Date(e.creado).toLocaleTimeString("es-CO")}</span> {e.mensaje}
+          <span className="suave">{new Date(e.creado).toLocaleTimeString("es-CO")}</span>
+          {e.datos?.worker && <span className="suave"> [{e.datos.worker}]</span>} {e.mensaje}
         </div>
       ))}
     </div>

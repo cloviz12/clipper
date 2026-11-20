@@ -102,7 +102,9 @@ def log(msg, nivel="info", **datos):
     line = f"{time.strftime('%H:%M:%S')} [{nivel}] {msg}"
     print(line, flush=True)
     try:
-        sb().table("eventos").insert({"nivel": nivel, "mensaje": str(msg)[:1000], "datos": datos or None}).execute()
+        # el registro es de todas las PCs/servidor del equipo: se guarda cual escribio cada linea
+        sb().table("eventos").insert({"nivel": nivel, "mensaje": str(msg)[:1000],
+                                      "datos": dict(datos, worker=WORKER)}).execute()
     except Exception:
         pass
 

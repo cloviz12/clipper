@@ -117,15 +117,23 @@ def renderizar(src, ctx, carpeta=None):
             "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{dur:.2f}", str(salida)]
     run(cmd, cwd=str(TRABAJO))
     mini = TRABAJO / f"{nombre}.jpg"
-    run([tool("ffmpeg"), "-y", "-v", "error", "-ss", f"{max(0.5, (pico or dur / 2))}", "-i", str(salida),
-         "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "4", "-strict", "unofficial", str(mini)])
+    # si el segundo pedido cae pasado el final del video, ffmpeg termina "bien" pero no crea la imagen
+    # (pasaba cuando el pico quedaba mas lejos que la duracion real del clip): se pide dentro del video
+    for t in (max(0.0, min(pico or dur / 2, dur - 0.6)), 0.0):
+        run([tool("ffmpeg"), "-y", "-v", "error", "-ss", f"{t:.2f}", "-i", str(salida),
+             "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "4", "-strict", "unofficial", str(mini)])
+        if mini.exists():
+            break
 
     # 6. guardar y avisar al panel
     dia = datetime.now().strftime("%Y-%m-%d")
     vpath, mpath = f"{dia}/{nombre}.mp4", f"{dia}/{nombre}.jpg"
     st = sb().storage.from_("clips")
     st.upload(vpath, salida.read_bytes(), {"content-type": "video/mp4", "upsert": "true"})
-    st.upload(mpath, mini.read_bytes(), {"content-type": "image/jpeg", "upsert": "true"})
+    if mini.exists():
+        st.upload(mpath, mini.read_bytes(), {"content-type": "image/jpeg", "upsert": "true"})
+    else:
+        mpath = None                      # sin miniatura: el clip se guarda igual
 
     canal = ctx.get("canal") or "canal"
     tags = list(dict.fromkeys([h if h.startswith("#") else "#" + h for h in (tx.get("hashtags") or [])] +
