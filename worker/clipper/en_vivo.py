@@ -83,8 +83,17 @@ class Monitor(threading.Thread):
             if st is None:
                 raise RuntimeError("streamlink no encontro calidades")
             ff = subprocess.Popen([tool("ffmpeg"), "-v", "error", "-i", "pipe:0"] + salida,
-                                  stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, **_sin_ventana())
+                                  stdin=subprocess.PIPE, stderr=subprocess.PIPE, **_sin_ventana())
             self.procs = [ff]
+            errores = deque(maxlen=4)       # lo ultimo que dijo ffmpeg, para saber por que se cierra
+
+            def _leer_err(pr=ff):
+                try:
+                    for ln in pr.stderr:
+                        errores.append(ln.decode("utf-8", "replace").strip()[:200])
+                except Exception:
+                    pass
+            threading.Thread(target=_leer_err, daemon=True).start()
             fd = st.open()
             try:
                 while self.vivo:
@@ -106,7 +115,9 @@ class Monitor(threading.Thread):
         except Exception as e:
             if not self.vivo:
                 return
-            log(f"{self.canal}: streamlink no pudo ({str(e)[:150]}); pruebo directo con yt-dlp", "aviso")
+            motivo_ff = " | ".join(errores) if "errores" in locals() and errores else ""
+            log(f"{self.canal}: streamlink no pudo ({str(e)[:150]}){' — ffmpeg dijo: ' + motivo_ff if motivo_ff else ''}; "
+                f"pruebo directo con yt-dlp", "aviso")
         for p in self.procs:                       # que no quede un ffmpeg viejo escribiendo los mismos pedacitos
             try:
                 p.kill()
