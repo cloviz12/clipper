@@ -69,7 +69,11 @@ def caras(path, W, H, dur, guardar=None):
             g = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
             boxes = det.detectMultiScale(g, 1.1, 6, minSize=(24, 24))
         if len(boxes):
-            x, y, w, h = max(boxes, key=lambda b: b[2] * b[3])
+            def _peso(b):
+                # una facecam vive pegada a una orilla; los personajes y NPC del juego estan al centro
+                lejos = max(abs((b[0] + b[2] / 2) / ancho - 0.5), abs((b[1] + b[3] / 2) / alto - 0.5)) * 2
+                return b[2] * b[3] * (1 + 1.5 * float(np.clip((lejos - 0.4) / 0.5, 0, 1)))
+            x, y, w, h = max(boxes, key=_peso)[:4]
             out.append((t, x * k, y * k, w * k, h * k))
         else:
             out.append((t, None))
@@ -209,14 +213,34 @@ def _recorte_juego(cam, W, H, cam_h):
     return gw, gx_m // 2 * 2
 
 
-def planear(path, info, preferencia="auto", es_juego=None):
-    """es_juego: True si el directo es de un videojuego (por la categoria), False si es charla/IRL,
+def _plan_camara_fija(camara, W, H):
+    """Split con la camara donde el usuario dijo (fracciones x, y, ancho, alto del video). None si no sirve."""
+    try:
+        fx, fy, fw, fh = [float(v) for v in camara]
+    except Exception:
+        return None
+    fw, fh = min(max(fw, 0.05), 0.7), min(max(fh, 0.05), 0.7)
+    fx, fy = min(max(fx, 0.0), 1 - fw), min(max(fy, 0.0), 1 - fh)
+    caja = [fx * W, fy * H, fw * W, fh * H]
+    cara = (caja[0] + caja[2] / 2, caja[1] + caja[3] * 0.45, caja[2] * 0.4, caja[3] * 0.5)
+    cam, cam_h = _ajustar_panel(caja, cara, W, H)
+    gw, gx = _recorte_juego(cam, W, H, cam_h)
+    return {"tipo": "split", "cam": cam, "cam_h": cam_h, "gw": gw, "gx": gx, "bordes": -1}
+
+
+def planear(path, info, preferencia="auto", es_juego=None, camara=None):
+    """camara: [x, y, ancho, alto] en fracciones del video si el usuario indico donde esta la facecam.
+    es_juego: True si el directo es de un videojuego (por la categoria), False si es charla/IRL,
     None si no se sabe (se decide mirando el video)."""
     W, H, dur = info["w"], info["h"], info["dur"]
     if H >= W * 1.2:
         return {"tipo": "vertical"}
     if preferencia in ("blur", "crop"):
         return {"tipo": preferencia}
+    if camara and es_juego is not False and preferencia != "seguir":
+        plan = _plan_camara_fija(camara, W, H)       # la camara que indico el usuario: siempre camara arriba, juego abajo
+        if plan:
+            return plan
     cuadros = []
     try:
         muestras = caras(path, W, H, dur, cuadros)

@@ -48,7 +48,8 @@ def renderizar(src, ctx, carpeta=None):
     palabras, frases = ([], [])
     if info["audio"]:
         pista = f"{ctx.get('canal', '')}. {ctx.get('titulo_fuente', '')}"[:200]
-        palabras, frases = subtitulos.transcribir(src, aj, ctx.get("idioma"), pista)
+        idioma = ctx.get("idioma") or ((ctx.get("fuente") or {}).get("opciones") or {}).get("idioma")
+        palabras, frases = subtitulos.transcribir(src, aj, idioma, pista)
 
     # 2. arrancar sin relleno: si nadie habla al inicio, se recorta (salvo que el pico este ahi)
     corte = 0.0
@@ -70,7 +71,8 @@ def renderizar(src, ctx, carpeta=None):
     palabras = ia.corregir(palabras, tx.get("correcciones"))
 
     # 4. encuadre y efectos
-    plan = encuadre.planear(src, info, aj.get("formato", "auto"), es_videojuego(ctx.get("categoria")))
+    camara = ((ctx.get("fuente") or {}).get("opciones") or {}).get("camara")
+    plan = encuadre.planear(src, info, aj.get("formato", "auto"), es_videojuego(ctx.get("categoria")), camara)
     rnd = random.Random(cid)
     ncam = efectos.INTENSIDAD.get(aj.get("efectos_camara", "medio"), 2)
     nsfx = efectos.INTENSIDAD.get(aj.get("efectos_sonido", "medio"), 2)
@@ -116,7 +118,7 @@ def renderizar(src, ctx, carpeta=None):
     run(cmd, cwd=str(TRABAJO))
     mini = TRABAJO / f"{nombre}.jpg"
     run([tool("ffmpeg"), "-y", "-v", "error", "-ss", f"{max(0.5, (pico or dur / 2))}", "-i", str(salida),
-         "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "4", str(mini)])
+         "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "4", "-strict", "unofficial", str(mini)])
 
     # 6. guardar y avisar al panel
     dia = datetime.now().strftime("%Y-%m-%d")
@@ -155,7 +157,13 @@ def renderizar(src, ctx, carpeta=None):
         "detectado_en": ctx.get("detectado_en") or datetime.now(timezone.utc).isoformat(),
         "aprobado_por": f"auto ({WORKER})" if auto else None,
     }
-    sb().table("clips").insert(fila).execute()
+    try:
+        sb().table("clips").insert(fila).execute()
+    except Exception as e:
+        if "clips_fuente_id_fkey" not in str(e):
+            raise
+        fila["fuente_id"] = None      # el canal se quito del panel mientras el clip se editaba: no se pierde el clip
+        sb().table("clips").insert(fila).execute()
     for p in (ass, mini):
         p.unlink(missing_ok=True)
     if carpeta is None:
