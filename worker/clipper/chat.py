@@ -121,6 +121,41 @@ def _sala_kick(canal):
     return None, errores
 
 
+KICK_PUSHER_KEY = "32cbd69e4b950bf97679"
+# Kick usa Pusher; si cambia de cluster, Pusher responde 4001 "App key ... not in this cluster". Se prueban todos y se recuerda el que sirve.
+CLUSTERS_PUSHER = ("us2", "us3", "mt1", "eu", "ap1", "ap2", "ap3", "ap4", "sa1")
+_cluster = {"ok": None}
+
+
+def _abrir_kick(websocket, sala):
+    """Abre el websocket del chat probando los clusters de Pusher. Devuelve (ws, cluster, motivos de los que fallaron)."""
+    orden = ([_cluster["ok"]] if _cluster["ok"] else []) + [c for c in CLUSTERS_PUSHER if c != _cluster["ok"]]
+    motivos = []
+    for c in orden:
+        ws = None
+        try:
+            ws = websocket.create_connection(
+                f"wss://ws-{c}.pusher.com/app/{KICK_PUSHER_KEY}?protocol=7&client=js&version=8.4.0&flash=false", timeout=15)
+            ws.send(json.dumps({"event": "pusher:subscribe", "data": {"auth": "", "channel": f"chatrooms.{sala}.v2"}}))
+            for _ in range(6):
+                ev = json.loads(ws.recv()).get("event", "")
+                if ev == "pusher_internal:subscription_succeeded":
+                    _cluster["ok"] = c
+                    ws.settimeout(60)
+                    return ws, c, motivos
+                if ev == "pusher:error":
+                    motivos.append(f"{c}: pusher:error")
+                    break
+        except Exception as e:
+            motivos.append(f"{c}: {type(e).__name__}")
+        try:
+            if ws is not None:
+                ws.close()
+        except Exception:
+            pass
+    return None, None, motivos
+
+
 def kick(canal, chat):
     """Chat de Kick por su websocket publico (Pusher). Avisa en el Registro si no logra conectar,
     porque sin chat solo quedan el audio y los clips de la comunidad para detectar momentos."""
@@ -130,20 +165,20 @@ def kick(canal, chat):
         if sala is None:
             log(f"{canal}: no pude conectar el chat de Kick ({' | '.join(errores)[:300]}); detecto solo con audio y clips de la comunidad", "aviso")
             return
-        url = "wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false"
         ult_err, conectado = 0, False
         while chat.vivo:
             try:
-                ws = websocket.create_connection(url, timeout=60)
-                ws.send(json.dumps({"event": "pusher:subscribe", "data": {"auth": "", "channel": f"chatrooms.{sala}.v2"}}))
+                ws, cluster, motivos = _abrir_kick(websocket, sala)
+                if ws is None:
+                    raise RuntimeError("ningun cluster de Pusher acepto la conexion (" + " | ".join(motivos)[:200] + ")")
+                if not conectado:
+                    conectado = True
+                    log(f"{canal}: chat de Kick conectado (cluster {cluster})", "vivo")
                 while chat.vivo:
                     m = json.loads(ws.recv())
                     ev = m.get("event", "")
                     if ev == "pusher:ping":
                         ws.send(json.dumps({"event": "pusher:pong", "data": {}}))
-                    elif ev == "pusher_internal:subscription_succeeded" and not conectado:
-                        conectado = True
-                        log(f"{canal}: chat de Kick conectado", "vivo")
                     elif ev == "pusher:error":
                         raise RuntimeError(str(m.get("data"))[:150])
                     elif "ChatMessage" in ev:

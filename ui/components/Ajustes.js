@@ -17,6 +17,7 @@ const CAMPOS = [
   ["tiktok_modo", "TikTok", ["borrador", "directo"], "borrador: llega a la bandeja de la app de TikTok y se termina desde el celular. directo: se confirma en tanda en la pestaña TikTok y se publica solo a la hora programada."],
   ["youtube_privacidad", "Privacidad en YouTube", ["public", "unlisted", "private"]],
   ["dias_guardar_videos", "Días que se guardan los videos ya publicados", "numero"],
+  ["max_clips_revisar", "Máximo de clips por revisar", "numero", "Si hay más, los más viejos se descartan solos y su video se borra de la nube (el plan gratis de Supabase tiene 1 GB). Pon 0 para no descartar nunca."],
 ];
 
 export default function Ajustes() {
