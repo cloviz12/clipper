@@ -232,6 +232,32 @@ def _archivo(clip):
     return local
 
 
+# Cuando una red dice que se llego a su limite diario, se deja de intentar un rato en vez de gastar cada clip
+# (y de insistirle a la red, que puede tomarlo como spam): palabras del error -> horas de pausa
+LIMITES = {
+    "youtube": (("exceeded the number of videos", "uploadlimitexceeded", "quota exceeded", "quotaexceeded"), 6),
+    "instagram": (("2207042", "too many actions", "reached the maximum"), 6),
+    "tiktok": (("spam_risk", "too_many_pending"), 3),    # demasiados borradores sin terminar en la app de TikTok
+}
+_pausa = {}
+
+
+def _pausada(red):
+    return _pausa.get(red, 0) > time.time()
+
+
+def _limite(red, mensaje):
+    """Horas de pausa si el error de esta red es un limite diario; 0 si es otro tipo de error."""
+    palabras, horas = LIMITES.get(red, ((), 0))
+    m = mensaje.lower()
+    return horas if any(w in m for w in palabras) else 0
+
+
+def _estado_espera(clip):
+    """Estado al que vuelve un clip que no se pudo publicar por una pausa: sigue esperando su turno."""
+    return "programado" if clip.get("publicar_en") else "aprobado"
+
+
 def publicar_siguiente():
     r = sb().rpc("tomar_clip_para_publicar", {"p_worker": WORKER}).execute()
     if not r.data:
@@ -245,6 +271,13 @@ def publicar_siguiente():
         sb().table("clips").update({"estado": "error", "errores": {"general": "no hay redes conectadas para este clip"}}).eq("id", clip["id"]).execute()
         log("no hay redes conectadas: conecta las cuentas en el panel", "error")
         return True
+    pausadas = [p for p in plats if _pausada(p) and p not in pubs]
+    plats = [p for p in plats if p not in pubs and p not in pausadas]
+    if not plats and pausadas:
+        # todas sus redes estan en pausa por limite: el clip espera, sin descargar nada ni gastar intentos
+        sb().table("clips").update({"estado": _estado_espera(clip)}).eq("id", clip["id"]).execute()
+        time.sleep(25)
+        return False
     # TikTok directo: TikTok exige que una persona confirme cada video. Queda esperando en la pestana TikTok
     esperando_tt = False
     if "tiktok" in plats and aj.get("tiktok_modo", "borrador") == "directo":
@@ -270,9 +303,16 @@ def publicar_siguiente():
         except Exception as e:
             errs[p] = str(e)[:500]
             log(f"{p}: no se pudo publicar ({str(e)[:200]})", "error", clip=clip["id"])
+            horas = _limite(p, str(e))
+            if horas:
+                _pausa[p] = time.time() + horas * 3600
+                pausadas.append(p)
+                log(f"{p}: llego a su limite diario; no se intenta de nuevo en {horas} h y estos clips esperan", "aviso")
     estado = "publicado" if pubs else "error"
     if esperando_tt and not pubs:
         estado = "programado"
+    if any(p not in pubs for p in pausadas):
+        estado = _estado_espera(clip)         # le falta una red en pausa: sigue en la cola para cuando se libere
     sb().table("clips").update({"estado": estado, "publicaciones": pubs, "errores": errs}).eq("id", clip["id"]).execute()
     video.unlink(missing_ok=True)
     return True
