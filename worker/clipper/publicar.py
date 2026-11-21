@@ -361,8 +361,18 @@ def _borrar_videos(clips):
 
 def limpiar():
     """Libera espacio en la nube (el plan gratis tiene 1 GB):
+    - sin revisar: solo se conservan los mas nuevos (Ajustes: maximo de clips por revisar)
     - descartados: se borra el video apenas se descartan
     - publicados: se borra a los N dias (Ajustes), salvo los que siguen esperando TikTok"""
+    # los clips sin revisar se acumulaban sin limite y llenaban el almacenamiento: se queda el tope mas nuevo
+    tope = int(ajustes().get("max_clips_revisar", 40))
+    if tope > 0:
+        r = sb().table("clips").select("id").eq("estado", "revisar").order("creado", desc=True) \
+            .range(tope, tope + 499).execute()
+        viejos = [c["id"] for c in r.data or []]
+        if viejos:
+            sb().table("clips").update({"estado": "descartado"}).in_("id", viejos).execute()
+            log(f"almacenamiento: se descartaron {len(viejos)} clips viejos sin revisar (maximo {tope}; se cambia en Ajustes)", "aviso")
     for _ in range(10):                      # por tandas, hasta vaciar los descartados
         r = sb().table("clips").select("id,video_path,miniatura_path").eq("estado", "descartado") \
             .not_.is_("video_path", "null").limit(100).execute()

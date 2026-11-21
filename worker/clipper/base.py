@@ -80,7 +80,7 @@ DEFAULTS = {
     "mostrar_credito": True, "mayusculas": True, "auto_puntaje_minimo": 70,
     "hashtags_base": ["#clips", "#streamer", "#viral", "#parati"], "horarios": [],
     "tiktok_modo": "borrador", "youtube_privacidad": "public", "youtube_categoria": "20",
-    "ia_modelo": "claude-haiku-5-5", "dias_guardar_videos": 3,
+    "ia_modelo": "claude-haiku-5-5", "dias_guardar_videos": 3, "max_clips_revisar": 40,
 }
 _aj = {"t": 0, "d": dict(DEFAULTS)}
 
