@@ -145,12 +145,15 @@ def subir_instagram(video, clip, aj):
             tok = d["access_token"]
     caption = (clip["textos"].get("instagram", {}).get("caption") or clip.get("titulo") or "")[:2200]
     errores = []
+    log(f"instagram: se envia con descripcion de {len(caption)} caracteres", "info", clip=clip.get("id"))
     for modo in ("url", "subida"):
         try:
             cid = _ig_contenedor(modo, host, ver, uid, tok, caption, video, clip)
             if cid is None:
                 continue
-            return _ig_publicar(host, ver, uid, tok, cid)
+            res = _ig_publicar(host, ver, uid, tok, cid)
+            _ig_verificar_descripcion(host, ver, tok, res["id"], caption, clip)
+            return res
         except Exception as e:
             errores.append(f"{modo}: {str(e)[:250]}")
             log(f"instagram ({modo}) fallo, {'pruebo otra forma' if modo == 'url' else 'sin mas intentos'}: {str(e)[:200]}", "aviso")
@@ -199,6 +202,20 @@ def _ig_contenedor(modo, host, ver, uid, tok, caption, video, clip):
         if s.get("status_code") == "ERROR":
             raise RuntimeError(f"Instagram no proceso el video: {s.get('status')}")
     raise RuntimeError("Instagram tardo demasiado en procesar el video")
+
+
+def _ig_verificar_descripcion(host, ver, tok, media_id, caption, clip):
+    """Despues de publicar, le pregunta a Instagram que descripcion quedo, y lo avisa si llego vacia."""
+    try:
+        r = requests.get(f"{host}/{ver}/{media_id}", params={"fields": "caption", "access_token": tok}, timeout=30).json()
+        quedo = (r.get("caption") or "").strip()
+        if caption.strip() and not quedo:
+            log(f"instagram: se envio la descripcion ({len(caption)} caracteres) pero el Reel quedo SIN descripcion "
+                f"(respuesta: {str(r)[:150]})", "aviso", clip=clip.get("id"))
+        else:
+            log(f"instagram: descripcion publicada ({len(quedo)} caracteres)", "info", clip=clip.get("id"))
+    except Exception as e:
+        log(f"instagram: no pude verificar la descripcion ({str(e)[:100]})", "info", clip=clip.get("id"))
 
 
 def _ig_publicar(host, ver, uid, tok, cid):

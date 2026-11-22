@@ -43,9 +43,16 @@ def _heuristica(ctx):
             "hashtags": [tag], "correcciones": {}}
 
 
+_aviso_sin_llave = []
+
+
 def textos(ctx, aj):
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
+        if not _aviso_sin_llave:                 # una vez por sesion: antes pasaba en silencio
+            _aviso_sin_llave.append(True)
+            log("sin llave de Claude: los hooks, titulos y descripciones salen con reglas simples "
+                "(el hook es el inicio de lo que se dice). Ponla en Esta PC > Llave de Claude", "aviso")
         return _heuristica(ctx)
     usuario = json.dumps({
         "streamer": ctx.get("canal"), "titulo_del_directo": ctx.get("titulo_fuente"),
