@@ -138,13 +138,14 @@ def _abrir_kick(websocket, sala):
                 f"wss://ws-{c}.pusher.com/app/{KICK_PUSHER_KEY}?protocol=7&client=js&version=8.4.0&flash=false", timeout=15)
             ws.send(json.dumps({"event": "pusher:subscribe", "data": {"auth": "", "channel": f"chatrooms.{sala}.v2"}}))
             for _ in range(6):
-                ev = json.loads(ws.recv()).get("event", "")
+                m = json.loads(ws.recv())
+                ev = m.get("event", "")
                 if ev == "pusher_internal:subscription_succeeded":
                     _cluster["ok"] = c
                     ws.settimeout(60)
                     return ws, c, motivos
                 if ev == "pusher:error":
-                    motivos.append(f"{c}: pusher:error")
+                    motivos.append(f"{c}: {str(m.get('data'))[:90]}")     # que dijo Pusher (codigo y mensaje)
                     break
         except Exception as e:
             motivos.append(f"{c}: {type(e).__name__}")
@@ -170,7 +171,7 @@ def kick(canal, chat):
             try:
                 ws, cluster, motivos = _abrir_kick(websocket, sala)
                 if ws is None:
-                    raise RuntimeError("ningun cluster de Pusher acepto la conexion (" + " | ".join(motivos)[:200] + ")")
+                    raise RuntimeError("ningun cluster de Pusher acepto la conexion (" + " | ".join(motivos[:2])[:260] + ")")
                 if not conectado:
                     conectado = True
                     log(f"{canal}: chat de Kick conectado (cluster {cluster})", "vivo")
